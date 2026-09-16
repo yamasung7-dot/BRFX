@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Procedural Sky Dome Pass v0.9.0
+ * Stable Skybox Pass v0.9.1
  *
  * MIT License — see LICENSE
  */
@@ -9,8 +9,8 @@ Plugin.register('brfx', {
     title: 'BRFX — Render FX',
     author: 'Yama Sung',
     icon: 'auto_awesome',
-    description: 'Procedural 3-color sky dome with camera-following environment lighting.',
-    version: '0.9.0',
+    description: 'Stable procedural 3-color skybox with camera-independent rendering.',
+    version: '0.9.1',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -21,7 +21,6 @@ Plugin.register('brfx', {
         plugin.lightBillboard = null;
         plugin.lightSyncTimer = null;
         plugin.skyDome = null;
-        plugin.skyFollowTimer = null;
         plugin.originalLightColor = Canvas.global_light_color.clone();
         plugin.originalLightSide = Canvas.global_light_side;
         plugin.originalSunIntensity = (typeof Sun !== 'undefined' && Sun) ? Sun.intensity : null;
@@ -192,47 +191,43 @@ Plugin.register('brfx', {
         };
 
         plugin.removeSkyDome = function() {
-            if (plugin.skyFollowTimer) clearInterval(plugin.skyFollowTimer);
-            plugin.skyFollowTimer = null;
             if (plugin.skyDome) {
                 const sky = plugin.skyDome;
                 if (sky.parent) sky.parent.remove(sky);
                 if (sky.geometry && typeof sky.geometry.dispose === 'function') sky.geometry.dispose();
-                if (sky.material) {
-                    if (sky.material.map && typeof sky.material.map.dispose === 'function') sky.material.map.dispose();
-                    if (typeof sky.material.dispose === 'function') sky.material.dispose();
-                }
+                if (sky.material && typeof sky.material.dispose === 'function') sky.material.dispose();
                 plugin.skyDome = null;
             }
             plugin.refresh();
         };
 
-        plugin.getPreviewCamera = function() {
-            if (typeof Preview !== 'undefined' && Preview.selected) {
-                const preview = Preview.selected;
-                if (preview.camera) return preview.camera;
-                if (preview.scene && preview.scene.camera) return preview.scene.camera;
-            }
-            if (typeof Camera !== 'undefined' && Camera) return Camera;
-            if (typeof window !== 'undefined' && window.camera) return window.camera;
-            return null;
-        };
-
+        /*
+         * The old sphere was a world-space object. That made the sky dependent
+         * on the preview far clip and on a 50ms camera-position timer. A real
+         * skybox should not move through world space at all: it follows only
+         * the camera rotation, with the camera translation removed from the
+         * model-view transform. This makes it stable at any zoom distance.
+         */
         plugin.createSkyDome = function() {
             const targetScene = plugin.getScene();
             if (!targetScene || typeof THREE === 'undefined') {
-                Blockbench.showQuickMessage('BRFX: viewport scene is not available for the sky dome', 3000);
+                Blockbench.showQuickMessage('BRFX: viewport scene is not available for the skybox', 3000);
                 return null;
             }
             plugin.removeSkyDome();
 
-            const geometry = new THREE.SphereGeometry(250, 32, 20);
+            const geometry = new THREE.BoxGeometry(2, 2, 2);
             const vertexShader = `
                 varying vec3 vDirection;
                 void main() {
-                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                    vDirection = normalize(worldPosition.xyz);
-                    gl_Position = projectionMatrix * viewMatrix * worldPosition;
+                    vec3 direction = position;
+                    vDirection = normalize(direction);
+                    mat4 viewNoTranslation = viewMatrix;
+                    viewNoTranslation[3][0] = 0.0;
+                    viewNoTranslation[3][1] = 0.0;
+                    viewNoTranslation[3][2] = 0.0;
+                    gl_Position = projectionMatrix * viewNoTranslation * vec4(position, 1.0);
+                    gl_Position.z = gl_Position.w;
                 }
             `;
             const fragmentShader = `
@@ -266,24 +261,14 @@ Plugin.register('brfx', {
                 depthTest: false,
                 fog: false,
             });
-            const dome = new THREE.Mesh(geometry, material);
-            dome.name = 'BRFX_Procedural_Sky_Dome';
-            dome.frustumCulled = false;
-            targetScene.add(dome);
-            plugin.skyDome = dome;
-
-            plugin.followSkyCamera = function() {
-                if (!plugin.skyDome) return;
-                const camera = plugin.getPreviewCamera();
-                if (!camera || !camera.position) return;
-                plugin.skyDome.position.copy(camera.position);
-                plugin.skyDome.updateMatrixWorld(true);
-            };
-            plugin.followSkyCamera();
-            if (plugin.skyFollowTimer) clearInterval(plugin.skyFollowTimer);
-            plugin.skyFollowTimer = setInterval(() => plugin.followSkyCamera(), 50);
+            const skybox = new THREE.Mesh(geometry, material);
+            skybox.name = 'BRFX_Procedural_Sky_Dome';
+            skybox.frustumCulled = false;
+            skybox.renderOrder = -100000;
+            targetScene.add(skybox);
+            plugin.skyDome = skybox;
             plugin.refresh();
-            return dome;
+            return skybox;
         };
 
         plugin.restoreLight = function(showMessage = true) {
@@ -324,15 +309,15 @@ Plugin.register('brfx', {
         });
         plugin.skyAction = new Action('brfx_sky_dome', {
             name: 'BRFX — Procedural Sky Dome',
-            description: 'Create a lightweight 3-color procedural sky dome that follows the Preview camera.',
+            description: 'Create a stable 3-color procedural skybox that follows camera rotation and is not limited by preview zoom distance.',
             icon: 'cloud',
-            click() { plugin.createSkyDome(); Blockbench.showQuickMessage('BRFX: 3-color Sky Dome enabled', 2500); },
+            click() { plugin.createSkyDome(); Blockbench.showQuickMessage('BRFX: Stable 3-color Skybox enabled', 2500); },
         });
         plugin.restoreSkyAction = new Action('brfx_remove_sky_dome', {
             name: 'BRFX — Remove Sky Dome',
-            description: 'Remove the BRFX procedural sky dome.',
+            description: 'Remove the BRFX procedural skybox.',
             icon: 'hide_source',
-            click() { plugin.removeSkyDome(); Blockbench.showQuickMessage('BRFX: Sky Dome removed', 2500); },
+            click() { plugin.removeSkyDome(); Blockbench.showQuickMessage('BRFX: Skybox removed', 2500); },
         });
         plugin.restoreAction = new Action('brfx_restore_light', {
             name: 'BRFX — Restore Lighting', description: 'Remove BRFX scene lights and their control billboard.', icon: 'restart_alt',
@@ -358,9 +343,7 @@ Plugin.register('brfx', {
 
     onunload() {
         if (this.lightSyncTimer) clearInterval(this.lightSyncTimer);
-        if (this.skyFollowTimer) clearInterval(this.skyFollowTimer);
         this.lightSyncTimer = null;
-        this.skyFollowTimer = null;
         if (this.removeSkyDome) this.removeSkyDome();
         if (this.restoreLight) this.restoreLight(false);
         const actions = ['warmAction', 'neutralAction', 'coolAction', 'cinematicAction', 'environmentAction', 'coolEnvironmentAction', 'skyAction', 'restoreSkyAction', 'restoreAction'];
@@ -382,8 +365,6 @@ Plugin.register('brfx', {
         this.addSoftEnvironment = null;
         this.addCoolEnvironment = null;
         this.removeSkyDome = null;
-        this.getPreviewCamera = null;
-        this.followSkyCamera = null;
         this.createSkyDome = null;
         this.restoreLight = null;
         this.originalLightColor = null;

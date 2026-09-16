@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Custom Sky Color Distribution Pass v0.9.6
+ * Custom Light Settings Menu Cleanup Pass v0.9.7
  * MIT License — see LICENSE
  */
 
@@ -9,7 +9,7 @@ Plugin.register('brfx', {
     author: 'Yama Sung',
     icon: 'auto_awesome',
     description: 'Custom light types, colors, intensity, and a fully customizable 3-color skybox.',
-    version: '0.9.6',
+    version: '0.9.7',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -183,7 +183,7 @@ Plugin.register('brfx', {
         };
         plugin.openCustomLight=function(){
             if(plugin.customDialog)try{plugin.customDialog.hide();}catch(e){}
-            plugin.customDialog=new Dialog({id:'brfx_custom_light_dialog',title:'BRFX-Costom Light',width:520,form:{
+            plugin.customDialog=new Dialog({id:'brfx_custom_light_dialog',title:'BRFX-Costom Light Settings',width:520,form:{
                 lightType:{label:'Light Type',type:'select',options:{default:'Default Light (Sunlight)',environment:'Environmental Light (Real Point Light)'},value:plugin.customSettings.lightType},
                 lightColor:{label:'Light Color',type:'color',value:plugin.customSettings.lightColor},
                 lightSide:{label:'Light Direction',type:'select',options:{'0':'Sun / Front','1':'Moon / Back'},value:String(plugin.customSettings.lightSide),condition:f=>f.lightType==='default'},
@@ -206,12 +206,11 @@ Plugin.register('brfx', {
         plugin.addAction('brfx_cinematic_purple','BRFX — Cinematic Purple','movie_filter',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#a878ff');Canvas.global_light_side=1;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#a878ff');Sun.intensity=1;}plugin.refresh();});
         plugin.addAction('brfx_environment_light','BRFX — Real Environment Light','lightbulb',()=>{const c=plugin.getModelCenter();plugin.addPointLight({color:'#ffd7ad',intensity:4,distance:40,position:c.clone().add(new THREE.Vector3(0,8,6))});if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#ffffff');Sun.intensity=0;}Blockbench.showQuickMessage('BRFX: Light Source billboard created — move or scale it to control the light',3500);});
         plugin.addAction('brfx_cool_environment','BRFX — Real Cool Environment','ac_unit',()=>{const c=plugin.getModelCenter();plugin.addPointLight({color:'#9ec5ff',intensity:4,distance:40,position:c.clone().add(new THREE.Vector3(0,8,-6))});if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#ffffff');Sun.intensity=0;}Blockbench.showQuickMessage('BRFX: Cool Light Source billboard created — move or scale it to control the light',3500);});
-        plugin.addAction('brfx_custom_light','BRFX-Costom Light','tune',()=>plugin.openCustomLight());
         plugin.addAction('brfx_procedural_sky','BRFX — Procedural Sky Dome','cloud',()=>plugin.createSkyDome());
         plugin.addAction('brfx_remove_sky','BRFX — Remove Sky Dome','cloud_off',()=>plugin.removeSkyDome());
         plugin.addAction('brfx_restore_lighting','BRFX — Restore Lighting','restore',()=>{plugin.removeSceneLights();Canvas.global_light_color.copy(plugin.originalLightColor);Canvas.global_light_side=plugin.originalLightSide;if(typeof Sun!=='undefined'&&Sun&&plugin.originalSunIntensity!==null)Sun.intensity=plugin.originalSunIntensity;plugin.removeSkyDome();plugin.refresh();Blockbench.showQuickMessage('BRFX: Original lighting restored',2500);});
         plugin.addAction('brfx_custom_light_settings','BRFX-Costom Light Settings','settings',()=>plugin.openCustomLight());
-        Blockbench.showQuickMessage('BRFX 0.9.6 loaded — Sky color distribution controls added',3000);
+        Blockbench.showQuickMessage('BRFX 0.9.7 loaded — Custom Light Settings menu cleaned up',3000);
     },
 
     onunload() {
@@ -220,7 +219,7 @@ Plugin.register('brfx', {
         if(plugin.sceneLights)plugin.sceneLights.forEach(light=>{if(light&&light.parent)light.parent.remove(light);});
         if(plugin.lightBillboard)try{plugin.lightBillboard.remove();}catch(e){}
         if(plugin.skyDome){if(plugin.skyDome.parent)plugin.skyDome.parent.remove(plugin.skyDome);if(plugin.skyDome.geometry)plugin.skyDome.geometry.dispose();if(plugin.skyDome.material)plugin.skyDome.material.dispose();}
-        if(Canvas&&plugin.originalLightColor){Canvas.global_light_color.copy(plugin.originalLightColor);Canvas.global_light_side=plugin.originalLightSide;}
+        if(typeof Canvas!=='undefined'&&Canvas&&plugin.originalLightColor){Canvas.global_light_color.copy(plugin.originalLightColor);Canvas.global_light_side=plugin.originalLightSide;}
         if(typeof Sun!=='undefined'&&Sun&&plugin.originalSunIntensity!==null)Sun.intensity=plugin.originalSunIntensity;
         if(plugin.actionIds)plugin.actionIds.forEach(id=>{try{Blockbench.removeAction(id);}catch(e){}});
         plugin.refresh&&plugin.refresh();

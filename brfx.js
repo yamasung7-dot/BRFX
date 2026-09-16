@@ -9,12 +9,13 @@ Plugin.register('brfx', {
     author: 'Yama Sung',
     icon: 'auto_awesome',
     description: 'Environment-focused viewport rendering effects for Blockbench: ambient lighting, a procedural sky dome, and optional stylized edge outlines.',
-    version: '0.1.0',
+    version: '0.1.1',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
 
     onload() {
+        const plugin = this;
         const state = {
             ambient: 0.65,
             light_color: '#fff1dc',
@@ -27,9 +28,10 @@ Plugin.register('brfx', {
             outline_color: '#29232a',
             outline_threshold: 35,
         };
-
         const defaults = {...state};
+
         let dialog = null;
+        let dialogSnapshot = null;
         let sky_dome = null;
         let outline_material = null;
         let outline_meshes = [];
@@ -45,29 +47,25 @@ Plugin.register('brfx', {
             const sun = window.Sun;
             original = {
                 sun_intensity: sun ? sun.intensity : null,
+                sun_color: sun && sun.color ? sun.color.clone() : new THREE.Color(0xffffff),
                 light_color: Canvas.global_light_color ? Canvas.global_light_color.clone() : new THREE.Color(0xffffff),
                 light_side: Canvas.global_light_side,
                 background: Canvas.scene.background,
             };
         }
 
-        function updateMaterialLighting() {
+        function syncMaterialLighting(color, side) {
             if (!sceneReady()) return;
 
-            const color = new THREE.Color(state.light_color);
+            const numericSide = Number(side) || 0;
             Canvas.global_light_color.copy(color);
-            Canvas.global_light_side = Number(state.light_side) || 0;
-
-            if (window.Sun) {
-                window.Sun.intensity = Number(state.ambient);
-                window.Sun.color.copy(color);
-            }
+            Canvas.global_light_side = numericSide;
 
             if (Array.isArray(Canvas.emptyMaterials)) {
                 Canvas.emptyMaterials.forEach(material => {
                     if (!material || !material.uniforms) return;
                     if (material.uniforms.LIGHTCOLOR) material.uniforms.LIGHTCOLOR.value.copy(color);
-                    if (material.uniforms.LIGHTSIDE) material.uniforms.LIGHTSIDE.value = Number(state.light_side) || 0;
+                    if (material.uniforms.LIGHTSIDE) material.uniforms.LIGHTSIDE.value = numericSide;
                 });
             }
 
@@ -75,7 +73,7 @@ Plugin.register('brfx', {
                 Canvas.coloredSolidMaterials.forEach(material => {
                     if (!material || !material.uniforms) return;
                     if (material.uniforms.LIGHTCOLOR) material.uniforms.LIGHTCOLOR.value.copy(color);
-                    if (material.uniforms.LIGHTSIDE) material.uniforms.LIGHTSIDE.value = Number(state.light_side) || 0;
+                    if (material.uniforms.LIGHTSIDE) material.uniforms.LIGHTSIDE.value = numericSide;
                 });
             }
 
@@ -85,16 +83,11 @@ Plugin.register('brfx', {
                         const material = texture.getMaterial && texture.getMaterial();
                         if (!material || !material.uniforms) return;
                         if (material.uniforms.LIGHTCOLOR) material.uniforms.LIGHTCOLOR.value.copy(color);
-                        if (material.uniforms.LIGHTSIDE) material.uniforms.LIGHTSIDE.value = Number(state.light_side) || 0;
+                        if (material.uniforms.LIGHTSIDE) material.uniforms.LIGHTSIDE.value = numericSide;
                     } catch (error) {
                         // A texture may not have a render material yet.
                     }
                 });
-            }
-
-            if (Canvas.monochromaticSolidMaterial && Canvas.monochromaticSolidMaterial.uniforms) {
-                const uniforms = Canvas.monochromaticSolidMaterial.uniforms;
-                if (uniforms.base) uniforms.base.value = color;
             }
 
             if (Canvas.updateView) {
@@ -102,22 +95,28 @@ Plugin.register('brfx', {
             }
         }
 
-        function disposeObject(object) {
-            if (!object) return;
-            object.traverse(child => {
-                if (child.geometry && child.geometry.dispose) child.geometry.dispose();
-                if (child.material) {
-                    const materials = Array.isArray(child.material) ? child.material : [child.material];
-                    materials.forEach(material => {
-                        if (material && material.dispose) material.dispose();
-                    });
-                }
-            });
+        function applyLighting() {
+            if (!sceneReady()) return;
+            const color = new THREE.Color(state.light_color);
+            syncMaterialLighting(color, state.light_side);
+            if (window.Sun) {
+                window.Sun.intensity = Number(state.ambient);
+                if (window.Sun.color) window.Sun.color.copy(color);
+            }
+        }
+
+        function restoreLighting() {
+            if (!sceneReady() || !original) return;
+            syncMaterialLighting(original.light_color, original.light_side);
+            if (window.Sun) {
+                if (original.sun_intensity !== null) window.Sun.intensity = original.sun_intensity;
+                if (window.Sun.color) window.Sun.color.copy(original.sun_color);
+            }
+            Canvas.scene.background = original.background;
         }
 
         function createSkyDome() {
-            if (!sceneReady()) return;
-            if (sky_dome) return;
+            if (!sceneReady() || sky_dome) return;
 
             const vertexShader = `
                 varying vec3 vWorldPosition;
@@ -234,7 +233,7 @@ Plugin.register('brfx', {
             applying = true;
             try {
                 captureOriginal();
-                updateMaterialLighting();
+                applyLighting();
                 updateSkyDome();
                 refreshOutlines();
             } finally {
@@ -242,20 +241,21 @@ Plugin.register('brfx', {
             }
         }
 
-        function restoreOriginal() {
-            if (!sceneReady() || !original) return;
-            if (window.Sun && original.sun_intensity !== null) {
-                window.Sun.intensity = original.sun_intensity;
+        function cleanupVisuals() {
+            clearOutlines();
+            if (sky_dome && sky_dome.parent) sky_dome.parent.remove(sky_dome);
+            if (sky_dome) {
+                if (sky_dome.geometry) sky_dome.geometry.dispose();
+                if (sky_dome.material) sky_dome.material.dispose();
             }
-            Canvas.global_light_color.copy(original.light_color);
-            Canvas.global_light_side = original.light_side;
-            Canvas.scene.background = original.background;
-            updateMaterialLighting();
+            sky_dome = null;
         }
 
         function openDialog() {
             captureOriginal();
+            dialogSnapshot = {...state};
             if (dialog) {
+                dialog.setFormValues(state, false);
                 dialog.show();
                 return;
             }
@@ -339,25 +339,20 @@ Plugin.register('brfx', {
                 onConfirm(result) {
                     Object.assign(state, result);
                     applyAll();
+                    dialogSnapshot = {...state};
                     return true;
                 },
                 onButton(index) {
                     if (index === 1) {
                         Object.assign(state, defaults);
-                        dialog.setFormValues(defaults, true);
+                        dialog.setFormValues(defaults, false);
                         applyAll();
                         return false;
                     }
                 },
                 onCancel() {
-                    Object.assign(state, defaults);
-                    if (original) {
-                        // Rebuild the state from the values that existed before this dialog was opened.
-                        // The next opening captures the current BRFX state again.
-                        updateMaterialLighting();
-                        updateSkyDome();
-                        refreshOutlines();
-                    }
+                    if (dialogSnapshot) Object.assign(state, dialogSnapshot);
+                    applyAll();
                     return true;
                 },
             });
@@ -365,7 +360,7 @@ Plugin.register('brfx', {
             dialog.show();
         }
 
-        this.action = new Action('brfx_open_settings', {
+        plugin.action = new Action('brfx_open_settings', {
             name: 'BRFX — Render FX Settings',
             description: 'Tune BRFX environment lighting, sky and outlines',
             icon: 'auto_awesome',
@@ -374,30 +369,32 @@ Plugin.register('brfx', {
         });
 
         if (MenuBar && MenuBar.menus && MenuBar.menus.tools) {
-            MenuBar.menus.tools.addAction(this.action);
+            MenuBar.menus.tools.addAction(plugin.action);
         }
 
-        captureOriginal();
-        applyAll();
-
-        this.updateCameraHandler = () => {
-            if (sky_dome && Canvas && Canvas.scene) {
-                sky_dome.visible = !!state.sky_enabled;
-            }
+        plugin.updateCameraHandler = () => {
+            if (sky_dome && Canvas && Canvas.scene) sky_dome.visible = !!state.sky_enabled;
         };
-        this.renderHandler = () => {
-            // Rebuild outlines after model edits/animation updates only when enabled.
+        plugin.renderHandler = () => {
             if (state.outlines && !applying && !outline_meshes.length) refreshOutlines();
         };
-        this.viewHandler = () => {
+        plugin.viewHandler = () => {
             if (state.outlines) refreshOutlines();
         };
 
-        Blockbench.on('update_camera_position', this.updateCameraHandler);
-        Blockbench.on('render_frame', this.renderHandler);
-        Blockbench.on('update_view', this.viewHandler);
-        Blockbench.on('new_project', this.viewHandler);
-        Blockbench.on('load_project', this.viewHandler);
+        plugin.cleanup = () => {
+            restoreLighting();
+            cleanupVisuals();
+        };
+
+        Blockbench.on('update_camera_position', plugin.updateCameraHandler);
+        Blockbench.on('render_frame', plugin.renderHandler);
+        Blockbench.on('update_view', plugin.viewHandler);
+        Blockbench.on('new_project', plugin.viewHandler);
+        Blockbench.on('load_project', plugin.viewHandler);
+
+        captureOriginal();
+        applyAll();
     },
 
     onunload() {
@@ -409,25 +406,8 @@ Plugin.register('brfx', {
             Blockbench.removeListener('new_project', this.viewHandler);
             Blockbench.removeListener('load_project', this.viewHandler);
         }
-
-        if (typeof Canvas !== 'undefined' && Canvas && Canvas.scene) {
-            const sky = Canvas.scene.getObjectByName('BRFX_SkyDome');
-            if (sky) {
-                Canvas.scene.remove(sky);
-                if (sky.geometry) sky.geometry.dispose();
-                if (sky.material && sky.material.dispose) sky.material.dispose();
-            }
-
-            Canvas.scene.traverse(object => {
-                if (object.userData && object.userData.brfx_outline && object.parent) {
-                    object.parent.remove(object);
-                    if (object.geometry) object.geometry.dispose();
-                }
-            });
-        }
-
-        if (window.BRFX && window.BRFX.restore) {
-            try { window.BRFX.restore(); } catch (error) {}
-        }
+        if (this.cleanup) this.cleanup();
+        this.action = null;
+        this.cleanup = null;
     },
 });

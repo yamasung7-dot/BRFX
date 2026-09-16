@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Scene Lighting Pass v0.7.0
+ * Scene Lighting Pass v0.8.0
  *
  * MIT License — see LICENSE
  */
@@ -9,8 +9,8 @@ Plugin.register('brfx', {
     title: 'BRFX — Scene Lighting',
     author: 'Yama Sung',
     icon: 'auto_awesome',
-    description: 'Scene-aware lighting with a movable and scalable Blockbench light-source control.',
-    version: '0.7.0',
+    description: 'Scene-aware lighting with a movable and resizable Blockbench billboard light-source control.',
+    version: '0.8.0',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -18,12 +18,13 @@ Plugin.register('brfx', {
     onload() {
         const plugin = this;
         plugin.sceneLights = [];
-        plugin.lightLocator = null;
+        plugin.lightBillboard = null;
         plugin.lightSyncTimer = null;
         plugin.originalLightColor = Canvas.global_light_color.clone();
         plugin.originalLightSide = Canvas.global_light_side;
         plugin.originalSunIntensity = (typeof Sun !== 'undefined' && Sun) ? Sun.intensity : null;
         plugin.baseLightDistance = 40;
+        plugin.baseBillboardSize = 4;
 
         plugin.refresh = function() {
             if (typeof Canvas.updateAllFaces === 'function') Canvas.updateAllFaces();
@@ -55,29 +56,26 @@ Plugin.register('brfx', {
             return center;
         };
 
-        plugin.removeLightLocator = function() {
-            if (plugin.lightLocator) {
-                try { plugin.lightLocator.remove(); } catch (error) { /* already removed */ }
-                plugin.lightLocator = null;
+        plugin.removeLightBillboard = function() {
+            if (plugin.lightBillboard) {
+                try { plugin.lightBillboard.remove(); } catch (error) { /* already removed */ }
+                plugin.lightBillboard = null;
             }
         };
 
-        plugin.getLocatorPosition = function(locator) {
-            if (!locator) return null;
+        plugin.getBillboardPosition = function(billboard) {
+            if (!billboard) return null;
 
-            // Locator.from is the native Blockbench transform position. Using it
-            // directly keeps the BRFX Three.js light in the same coordinate space
-            // as the model and avoids a world-transform mismatch on moved locators.
-            if (Array.isArray(locator.from) && locator.from.length >= 3) {
+            if (Array.isArray(billboard.position) && billboard.position.length >= 3) {
                 return new THREE.Vector3(
-                    Number(locator.from[0]) || 0,
-                    Number(locator.from[1]) || 0,
-                    Number(locator.from[2]) || 0
+                    Number(billboard.position[0]) || 0,
+                    Number(billboard.position[1]) || 0,
+                    Number(billboard.position[2]) || 0
                 );
             }
 
-            if (typeof locator.getWorldCenter === 'function') {
-                const position = locator.getWorldCenter();
+            if (typeof billboard.getWorldCenter === 'function') {
+                const position = billboard.getWorldCenter();
                 if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
                     return position.clone();
                 }
@@ -86,38 +84,25 @@ Plugin.register('brfx', {
             return null;
         };
 
-        plugin.getLocatorScale = function(locator) {
-            if (!locator) return 1;
+        plugin.getBillboardScale = function(billboard) {
+            if (!billboard || !Array.isArray(billboard.size) || billboard.size.length < 2) return 1;
 
-            // Blockbench's scale tool changes the locator's native scale. Use the
-            // average absolute axis scale so X/Y/Z scaling all affect the light's
-            // effective radius. Non-uniform scaling remains predictable.
-            if (Array.isArray(locator.scale) && locator.scale.length >= 3) {
-                const x = Math.abs(Number(locator.scale[0]) || 0);
-                const y = Math.abs(Number(locator.scale[1]) || 0);
-                const z = Math.abs(Number(locator.scale[2]) || 0);
-                const average = (x + y + z) / 3;
-                return Math.max(0.1, average || 1);
-            }
-
-            return 1;
+            const width = Math.abs(Number(billboard.size[0]) || 0);
+            const height = Math.abs(Number(billboard.size[1]) || 0);
+            const average = (width + height) / 2;
+            return Math.max(0.1, average / plugin.baseBillboardSize);
         };
 
-        plugin.syncLightToLocator = function() {
-            if (!plugin.lightLocator || !plugin.sceneLights.length) return;
+        plugin.syncLightToBillboard = function() {
+            if (!plugin.lightBillboard || !plugin.sceneLights.length) return;
             const light = plugin.sceneLights[0];
             if (!light) return;
 
-            const position = plugin.getLocatorPosition(plugin.lightLocator);
+            const position = plugin.getBillboardPosition(plugin.lightBillboard);
             if (!position) return;
 
-            const scale = plugin.getLocatorScale(plugin.lightLocator);
+            const scale = plugin.getBillboardScale(plugin.lightBillboard);
             light.position.copy(position);
-
-            // A Three.js PointLight has no visual radius property. Map the
-            // Blockbench locator scale to its illumination distance instead, so
-            // scaling the BRFX Light Source genuinely makes its influence smaller
-            // or larger while preserving the existing light intensity.
             light.distance = plugin.baseLightDistance * scale;
             light.updateMatrixWorld(true);
             plugin.refresh();
@@ -126,30 +111,40 @@ Plugin.register('brfx', {
         plugin.startLightSync = function() {
             if (plugin.lightSyncTimer) clearInterval(plugin.lightSyncTimer);
             plugin.lightSyncTimer = setInterval(() => {
-                plugin.syncLightToLocator();
+                plugin.syncLightToBillboard();
             }, 50);
         };
 
-        plugin.createLightLocator = function(position, distance) {
-            plugin.removeLightLocator();
-            if (typeof Locator === 'undefined') {
-                Blockbench.showQuickMessage('BRFX: Blockbench locators are unavailable', 3000);
+        plugin.createLightBillboard = function(position, distance) {
+            plugin.removeLightBillboard();
+
+            if (typeof Billboard === 'undefined') {
+                Blockbench.showQuickMessage('BRFX: Blockbench billboards are unavailable in this model format', 3500);
+                return null;
+            }
+
+            if (typeof Billboard.isTypePermitted === 'function' && !Billboard.isTypePermitted('billboard')) {
+                Blockbench.showQuickMessage('BRFX: this model format does not permit billboard elements', 3500);
                 return null;
             }
 
             const vector = position || plugin.getModelCenter().clone().add(new THREE.Vector3(0, 8, 6));
             plugin.baseLightDistance = Number.isFinite(distance) ? distance : 40;
+            plugin.baseBillboardSize = 4;
 
-            const locator = new Locator({
+            const billboard = new Billboard({
                 name: 'BRFX Light Source',
-                from: [vector.x, vector.y, vector.z],
+                position: [vector.x, vector.y, vector.z],
+                size: [plugin.baseBillboardSize, plugin.baseBillboardSize],
+                visibility: true,
+                export: false,
             }).init();
 
-            locator.addTo();
-            locator.select();
-            plugin.lightLocator = locator;
+            billboard.addTo();
+            billboard.select();
+            plugin.lightBillboard = billboard;
             plugin.startLightSync();
-            return locator;
+            return billboard;
         };
 
         plugin.removeSceneLights = function() {
@@ -160,7 +155,7 @@ Plugin.register('brfx', {
                 if (light && light.target && light.target.parent) light.target.parent.remove(light.target);
             });
             plugin.sceneLights.length = 0;
-            plugin.removeLightLocator();
+            plugin.removeLightBillboard();
             plugin.refresh();
         };
 
@@ -183,7 +178,7 @@ Plugin.register('brfx', {
             light.position.copy(position);
             targetScene.add(light);
             plugin.sceneLights.push(light);
-            plugin.createLightLocator(position, distance);
+            plugin.createLightBillboard(position, distance);
             plugin.refresh();
             return light;
         };
@@ -200,7 +195,7 @@ Plugin.register('brfx', {
                 Sun.color.set('#fff1df');
                 if (typeof Sun.intensity === 'number') Sun.intensity = 0.65;
             }
-            Blockbench.showQuickMessage('BRFX: Light Source created — move or scale the locator to control it', 3500);
+            Blockbench.showQuickMessage('BRFX: Light Source billboard created — move or scale it to control the light', 3500);
         };
 
         plugin.addCoolEnvironment = function() {
@@ -215,7 +210,7 @@ Plugin.register('brfx', {
                 Sun.color.set('#dbe9ff');
                 if (typeof Sun.intensity === 'number') Sun.intensity = 0.45;
             }
-            Blockbench.showQuickMessage('BRFX: Cool Light Source created — move or scale the locator to control it', 3500);
+            Blockbench.showQuickMessage('BRFX: Cool Light Source billboard created — move or scale it to control the light', 3500);
         };
 
         plugin.restoreLight = function(showMessage = true) {
@@ -286,21 +281,21 @@ Plugin.register('brfx', {
 
         plugin.environmentAction = new Action('brfx_real_environment', {
             name: 'BRFX — Real Environment Light',
-            description: 'Create a real point light with a movable and scalable BRFX Light Source locator.',
+            description: 'Create a real point light with a movable and resizable BRFX Light Source billboard.',
             icon: 'wb_sunny',
             click() { plugin.addSoftEnvironment(); },
         });
 
         plugin.coolEnvironmentAction = new Action('brfx_real_cool_environment', {
             name: 'BRFX — Real Cool Environment',
-            description: 'Create a cool point light with a movable and scalable BRFX Light Source locator.',
+            description: 'Create a cool point light with a movable and resizable BRFX Light Source billboard.',
             icon: 'nightlight',
             click() { plugin.addCoolEnvironment(); },
         });
 
         plugin.restoreAction = new Action('brfx_restore_light', {
             name: 'BRFX — Restore Lighting',
-            description: 'Remove BRFX scene lights and their control locator.',
+            description: 'Remove BRFX scene lights and their control billboard.',
             icon: 'restart_alt',
             click() { plugin.restoreLight(); },
         });
@@ -339,16 +334,16 @@ Plugin.register('brfx', {
         this.coolEnvironmentAction = null;
         this.restoreAction = null;
         this.sceneLights = null;
-        this.lightLocator = null;
+        this.lightBillboard = null;
         this.refresh = null;
         this.getScene = null;
         this.getModelCenter = null;
-        this.getLocatorPosition = null;
-        this.getLocatorScale = null;
-        this.removeLightLocator = null;
-        this.syncLightToLocator = null;
+        this.getBillboardPosition = null;
+        this.getBillboardScale = null;
+        this.removeLightBillboard = null;
+        this.syncLightToBillboard = null;
         this.startLightSync = null;
-        this.createLightLocator = null;
+        this.createLightBillboard = null;
         this.removeSceneLights = null;
         this.addPointLight = null;
         this.addSoftEnvironment = null;
@@ -357,5 +352,6 @@ Plugin.register('brfx', {
         this.originalLightColor = null;
         this.originalSunIntensity = null;
         this.baseLightDistance = null;
+        this.baseBillboardSize = null;
     },
 });

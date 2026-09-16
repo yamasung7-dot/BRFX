@@ -1,8 +1,8 @@
-/* BRFX — Blockbench Render FX — Billboard Light Controller Fix v1.7.1 */
+/* BRFX — Blockbench Render FX — Uninstall Cleanup Pass v1.7.2 */
 Plugin.register('brfx', {
   title:'BRFX — Render FX', author:'Yama Sung', icon:'auto_awesome',
   description:'Lighting, skybox, atmosphere, mobile optimization and internal glow effects.',
-  version:'1.7.1', variant:'both', min_version:'4.10.0', tags:['Rendering','Tools'],
+  version:'1.7.2', variant:'both', min_version:'4.10.0', tags:['Rendering','Tools'],
   onload(){
     const p=this;
     p.enabled=true; p.mobile=false; p.light=null; p.hemi=null; p.billboard=null; p.sky=null;
@@ -20,16 +20,10 @@ Plugin.register('brfx', {
     const createBillboard=(l)=>{
       removeBillboard();
       if(typeof Billboard==='undefined')return false;
-      try{
-        if(Billboard.isTypePermitted && !Billboard.isTypePermitted('billboard'))return false;
-      }catch(e){}
+      try{if(Billboard.isTypePermitted && !Billboard.isTypePermitted('billboard'))return false;}catch(e){}
       try{
         const b=new Billboard({name:'BRFX Light Source',position:[l.position.x,l.position.y,l.position.z],size:[4,4],visibility:true,export:false});
-        b.init();
-        b.addTo();
-        b.select();
-        p.billboard=b;
-        return true;
+        b.init(); b.addTo(); b.select(); p.billboard=b; return true;
       }catch(e){console.error('BRFX billboard',e);p.billboard=null;return false;}
     };
     const createLight=()=>{
@@ -67,7 +61,21 @@ Plugin.register('brfx', {
     const restore=()=>{clearLighting();removeSky();removeGlow();getScenes().forEach(s=>{try{s.fog=null;}catch(e){}});msg('BRFX effects restored');};
     const A={toggle:new Action('brfx_toggle',{name:'BRFX — On / Off',icon:'power_settings_new',click:toggle}),light:new Action('brfx_light',{name:'BRFX-Costom Light Settings',icon:'lightbulb',click:lightDialog}),internal:new Action('brfx_internal',{name:'BRFX — Internal Light',icon:'flare',click:internalLight}),atmos:new Action('brfx_atmos',{name:'BRFX — Atmosphere Settings',icon:'cloud',click:atmosphere}),fog:new Action('brfx_fog',{name:'BRFX — Remove Fog',icon:'cloud_off',click:()=>{p.settings.fogEnabled=false;fog();msg('BRFX fog removed');}}),restore:new Action('brfx_restore',{name:'BRFX — Restore Lighting',icon:'undo',click:restore})};
     const menu=()=>{try{const t=MenuBar?.menus?.tools;if(!t)return;t.structure=(t.structure||[]).filter(x=>x?.id!=='brfx_menu'&&!String(x?.id||'').startsWith('brfx_'));t.structure.push({id:'brfx_menu',name:'BRFX',icon:'auto_awesome',children:Object.values(A)});t.update?.(true);}catch(e){console.error('BRFX menu',e);}};
-    menu();setTimeout(menu,300);applyAll();msg('BRFX 1.7.1 ready');
-    this.onunload=()=>{try{clearInterval(p._lightTimer);clearInterval(p._glowTimer);}catch(e){}clearLighting();removeSky();removeGlow();getScenes().forEach(s=>{try{s.fog=null;}catch(e){}});};
+
+    const cleanup=()=>{
+      try{clearInterval(p._lightTimer);p._lightTimer=null;}catch(e){}
+      try{clearInterval(p._glowTimer);p._glowTimer=null;}catch(e){}
+      clearLighting(); removeSky(); removeGlow();
+      getScenes().forEach(s=>{try{s.fog=null;}catch(e){}});
+      try{Outliner?.elements?.slice?.().forEach(e=>{if(e?.name==='BRFX Light Source'||String(e?.name||'').startsWith('BRFX_')){try{e.remove?.();}catch(x){}}});}catch(e){}
+      try{getScenes().forEach(s=>s.traverse?.(o=>{if(o!==p.sky&&String(o?.name||'').startsWith('BRFX_')){try{o.parent?.remove(o);}catch(x){}}}));}catch(e){}
+      try{const t=MenuBar?.menus?.tools;if(t){t.structure=(t.structure||[]).filter(x=>x?.id!=='brfx_menu'&&!String(x?.id||'').startsWith('brfx_'));t.update?.(true);}}catch(e){}
+      try{Object.values(A).forEach(a=>{try{a.delete?.();}catch(x){}});}catch(e){}
+      p.enabled=false;
+    };
+
+    menu();setTimeout(menu,300);applyAll();msg('BRFX 1.7.2 ready');
+    this.onunload=cleanup;
+    this.onuninstall=()=>{cleanup();msg('BRFX uninstalled cleanly');};
   }
 });

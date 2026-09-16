@@ -1,66 +1,129 @@
 /*
  * BRFX — Blockbench Render FX
- * Ambient Light Pass v0.4.0
+ * Scene Lighting Pass v0.5.0
  *
  * MIT License — see LICENSE
  */
 
 Plugin.register('brfx', {
-    title: 'BRFX — Ambient Light',
+    title: 'BRFX — Scene Lighting',
     author: 'Yama Sung',
     icon: 'auto_awesome',
-    description: 'Visible ambient and environment-lighting presets for the Blockbench viewport.',
-    version: '0.4.0',
+    description: 'Scene-aware lighting presets with real Three.js lights for the Blockbench viewport.',
+    version: '0.5.0',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
 
     onload() {
         const plugin = this;
-
+        plugin.sceneLights = [];
         plugin.originalLightColor = Canvas.global_light_color.clone();
         plugin.originalLightSide = Canvas.global_light_side;
         plugin.originalSunIntensity = (typeof Sun !== 'undefined' && Sun) ? Sun.intensity : null;
-        plugin.enabled = false;
 
         plugin.refresh = function() {
-            if (typeof Canvas.updateAllFaces === 'function') {
-                Canvas.updateAllFaces();
+            if (typeof Canvas.updateAllFaces === 'function') Canvas.updateAllFaces();
+            if (typeof Preview !== 'undefined' && Preview.selected && Preview.selected.render) {
+                try { Preview.selected.render(); } catch (error) { /* viewport may be between renders */ }
             }
         };
 
-        plugin.applyLight = function(color, side, label, intensity = null) {
-            Canvas.global_light_color.set(color);
-            Canvas.global_light_side = side;
+        plugin.getScene = function() {
+            return typeof scene !== 'undefined' ? scene : (window.scene || null);
+        };
 
-            if (typeof Sun !== 'undefined' && Sun) {
-                if (Sun.color) Sun.color.copy(Canvas.global_light_color);
-                if (intensity !== null && typeof Sun.intensity === 'number') {
-                    Sun.intensity = intensity;
-                }
+        plugin.getModelCenter = function() {
+            const center = new THREE.Vector3(0, 0, 0);
+            const box = new THREE.Box3();
+            let found = false;
+            if (typeof Outliner !== 'undefined' && Array.isArray(Outliner.elements)) {
+                Outliner.elements.forEach(element => {
+                    if (!element || !element.mesh || element.visibility === false) return;
+                    element.mesh.updateMatrixWorld(true);
+                    const elementBox = new THREE.Box3().setFromObject(element.mesh);
+                    if (!elementBox.isEmpty()) {
+                        box.union(elementBox);
+                        found = true;
+                    }
+                });
+            }
+            if (found) box.getCenter(center);
+            return center;
+        };
+
+        plugin.removeSceneLights = function() {
+            plugin.sceneLights.forEach(light => {
+                if (light && light.parent) light.parent.remove(light);
+                if (light && light.target && light.target.parent) light.target.parent.remove(light.target);
+            });
+            plugin.sceneLights.length = 0;
+            plugin.refresh();
+        };
+
+        plugin.addPointLight = function(options = {}) {
+            const targetScene = plugin.getScene();
+            if (!targetScene || typeof THREE === 'undefined' || !THREE.PointLight) {
+                Blockbench.showQuickMessage('BRFX: viewport scene is not available', 3000);
+                return null;
             }
 
+            plugin.removeSceneLights();
+            const color = new THREE.Color(options.color || '#ffe0b2');
+            const intensity = Number.isFinite(options.intensity) ? options.intensity : 3.0;
+            const distance = Number.isFinite(options.distance) ? options.distance : 32;
+            const light = new THREE.PointLight(color, intensity, distance, 2);
+            light.name = 'BRFX_Environment_Point_Light';
+            light.castShadow = false;
+            light.position.copy(options.position || plugin.getModelCenter());
+            targetScene.add(light);
+            plugin.sceneLights.push(light);
             plugin.refresh();
-            plugin.enabled = true;
-            Blockbench.showQuickMessage(`BRFX: ${label}`, 2500);
+            return light;
+        };
+
+        plugin.addSoftEnvironment = function() {
+            const center = plugin.getModelCenter();
+            plugin.addPointLight({
+                color: '#ffd7ad',
+                intensity: 4.0,
+                distance: 40,
+                position: center.clone().add(new THREE.Vector3(0, 8, 6)),
+            });
+            if (typeof Sun !== 'undefined' && Sun) {
+                Sun.color.set('#fff1df');
+                if (typeof Sun.intensity === 'number') Sun.intensity = 0.65;
+            }
+            Blockbench.showQuickMessage('BRFX: Real scene environment light enabled', 3000);
+        };
+
+        plugin.addCoolEnvironment = function() {
+            const center = plugin.getModelCenter();
+            plugin.addPointLight({
+                color: '#9ec5ff',
+                intensity: 4.0,
+                distance: 40,
+                position: center.clone().add(new THREE.Vector3(0, 8, -6)),
+            });
+            if (typeof Sun !== 'undefined' && Sun) {
+                Sun.color.set('#dbe9ff');
+                if (typeof Sun.intensity === 'number') Sun.intensity = 0.45;
+            }
+            Blockbench.showQuickMessage('BRFX: Cool scene environment light enabled', 3000);
         };
 
         plugin.restoreLight = function(showMessage = true) {
+            plugin.removeSceneLights();
             Canvas.global_light_color.copy(plugin.originalLightColor);
             Canvas.global_light_side = plugin.originalLightSide;
-
             if (typeof Sun !== 'undefined' && Sun) {
                 if (Sun.color) Sun.color.copy(Canvas.global_light_color);
                 if (plugin.originalSunIntensity !== null && typeof Sun.intensity === 'number') {
                     Sun.intensity = plugin.originalSunIntensity;
                 }
             }
-
             plugin.refresh();
-            plugin.enabled = false;
-            if (showMessage) {
-                Blockbench.showQuickMessage('BRFX: Blockbench lighting restored', 2500);
-            }
+            if (showMessage) Blockbench.showQuickMessage('BRFX: Blockbench lighting restored', 2500);
         };
 
         plugin.warmAction = new Action('brfx_warm_light', {
@@ -68,7 +131,11 @@ Plugin.register('brfx', {
             description: 'Strong golden ambient light for a warm, sunny look.',
             icon: 'wb_sunny',
             click() {
-                plugin.applyLight('#ffad52', 0, 'Warm Sun lighting enabled');
+                plugin.removeSceneLights();
+                Canvas.global_light_color.set('#ffad52');
+                Canvas.global_light_side = 0;
+                plugin.refresh();
+                Blockbench.showQuickMessage('BRFX: Warm Sun lighting enabled', 2500);
             },
         });
 
@@ -77,7 +144,11 @@ Plugin.register('brfx', {
             description: 'Restore a clean neutral daylight tint.',
             icon: 'light_mode',
             click() {
-                plugin.applyLight('#ffffff', 0, 'Neutral Daylight enabled');
+                plugin.removeSceneLights();
+                Canvas.global_light_color.set('#ffffff');
+                Canvas.global_light_side = 0;
+                plugin.refresh();
+                Blockbench.showQuickMessage('BRFX: Neutral Daylight enabled', 2500);
             },
         });
 
@@ -86,7 +157,11 @@ Plugin.register('brfx', {
             description: 'Strong blue ambient light for a cool nighttime look.',
             icon: 'ac_unit',
             click() {
-                plugin.applyLight('#6ea8ff', 1, 'Moonlight lighting enabled');
+                plugin.removeSceneLights();
+                Canvas.global_light_color.set('#6ea8ff');
+                Canvas.global_light_side = 1;
+                plugin.refresh();
+                Blockbench.showQuickMessage('BRFX: Moonlight lighting enabled', 2500);
             },
         });
 
@@ -95,26 +170,33 @@ Plugin.register('brfx', {
             description: 'A vivid purple-blue ambient tint for stylized scenes.',
             icon: 'movie',
             click() {
-                plugin.applyLight('#a878ff', 1, 'Cinematic Purple lighting enabled');
+                plugin.removeSceneLights();
+                Canvas.global_light_color.set('#a878ff');
+                Canvas.global_light_side = 1;
+                plugin.refresh();
+                Blockbench.showQuickMessage('BRFX: Cinematic Purple lighting enabled', 2500);
             },
         });
 
-        plugin.immersiveAction = new Action('brfx_immersive_ambient', {
-            name: 'BRFX — Immersive Ambient',
-            description: 'Blend incoming objects into the scene with soft environment-style illumination.',
-            icon: 'blur_on',
-            click() {
-                plugin.applyLight('#ffe3c2', 0, 'Immersive Ambient enabled', 1.15);
-            },
+        plugin.environmentAction = new Action('brfx_real_environment', {
+            name: 'BRFX — Real Environment Light',
+            description: 'Add a real point light to the viewport scene so nearby model surfaces receive light from its position.',
+            icon: 'wb_sunny',
+            click() { plugin.addSoftEnvironment(); },
+        });
+
+        plugin.coolEnvironmentAction = new Action('brfx_real_cool_environment', {
+            name: 'BRFX — Real Cool Environment',
+            description: 'Add a real cool point light to the viewport scene for nearby environmental illumination.',
+            icon: 'nightlight',
+            click() { plugin.addCoolEnvironment(); },
         });
 
         plugin.restoreAction = new Action('brfx_restore_light', {
             name: 'BRFX — Restore Lighting',
-            description: 'Restore Blockbench lighting to its previous state.',
+            description: 'Remove BRFX scene lights and restore Blockbench lighting.',
             icon: 'restart_alt',
-            click() {
-                plugin.restoreLight();
-            },
+            click() { plugin.restoreLight(); },
         });
 
         if (typeof MenuBar !== 'undefined' && MenuBar.menus && MenuBar.menus.tools) {
@@ -122,34 +204,41 @@ Plugin.register('brfx', {
             MenuBar.menus.tools.addAction(plugin.neutralAction);
             MenuBar.menus.tools.addAction(plugin.coolAction);
             MenuBar.menus.tools.addAction(plugin.cinematicAction);
-            MenuBar.menus.tools.addAction(plugin.immersiveAction);
+            MenuBar.menus.tools.addAction(plugin.environmentAction);
+            MenuBar.menus.tools.addAction(plugin.coolEnvironmentAction);
             MenuBar.menus.tools.addAction(plugin.restoreAction);
         }
 
-        plugin.applyLight('#ffad52', 0, 'Warm Sun lighting enabled');
+        Canvas.global_light_color.set('#ffad52');
+        Canvas.global_light_side = 0;
+        plugin.refresh();
     },
 
     onunload() {
-        if (this.restoreLight) {
-            this.restoreLight(false);
-        }
-
+        if (this.restoreLight) this.restoreLight(false);
         if (this.warmAction) this.warmAction.delete();
         if (this.neutralAction) this.neutralAction.delete();
         if (this.coolAction) this.coolAction.delete();
         if (this.cinematicAction) this.cinematicAction.delete();
-        if (this.immersiveAction) this.immersiveAction.delete();
+        if (this.environmentAction) this.environmentAction.delete();
+        if (this.coolEnvironmentAction) this.coolEnvironmentAction.delete();
         if (this.restoreAction) this.restoreAction.delete();
-
         this.warmAction = null;
         this.neutralAction = null;
         this.coolAction = null;
         this.cinematicAction = null;
-        this.immersiveAction = null;
+        this.environmentAction = null;
+        this.coolEnvironmentAction = null;
         this.restoreAction = null;
-        this.applyLight = null;
-        this.restoreLight = null;
+        this.sceneLights = null;
         this.refresh = null;
+        this.getScene = null;
+        this.getModelCenter = null;
+        this.removeSceneLights = null;
+        this.addPointLight = null;
+        this.addSoftEnvironment = null;
+        this.addCoolEnvironment = null;
+        this.restoreLight = null;
         this.originalLightColor = null;
         this.originalSunIntensity = null;
     },

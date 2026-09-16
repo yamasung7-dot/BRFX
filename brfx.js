@@ -1,7 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Custom Sky Color Fix Pass v0.9.5
- *
+ * Custom Sky Color Distribution Pass v0.9.6
  * MIT License — see LICENSE
  */
 
@@ -10,7 +9,7 @@ Plugin.register('brfx', {
     author: 'Yama Sung',
     icon: 'auto_awesome',
     description: 'Custom light types, colors, intensity, and a fully customizable 3-color skybox.',
-    version: '0.9.5',
+    version: '0.9.6',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -28,13 +27,12 @@ Plugin.register('brfx', {
         plugin.baseLightDistance = 40;
         plugin.baseBillboardSize = 4;
         plugin.customSettings = {
-            lightType: 'default', lightColor: '#ffad52', lightIntensity: 1,
-            lightSide: 0, environmentIntensity: 4, environmentDistance: 40,
-            skyEnabled: true, skyTop: '#4f82c4', skyHorizon: '#ffd6a0', skyBottom: '#6f5748'
+            lightType: 'default', lightColor: '#ffad52', lightIntensity: 1, lightSide: 0,
+            environmentIntensity: 4, environmentDistance: 40,
+            skyEnabled: true, skyTop: '#4f82c4', skyHorizon: '#ffd6a0', skyBottom: '#6f5748',
+            skyTopWeight: 70, skyHorizonWeight: 20, skyBottomWeight: 10
         };
 
-        // Blockbench's color form returns a tinycolor.Instance.
-        // Normalize every common color representation to a CSS color string.
         plugin.normalizeColor = function(value, fallback) {
             if (value == null) return fallback;
             try {
@@ -56,7 +54,7 @@ Plugin.register('brfx', {
                     const r = value.r <= 1 ? value.r * 255 : value.r;
                     const g = value.g <= 1 ? value.g * 255 : value.g;
                     const b = value.b <= 1 ? value.b * 255 : value.b;
-                    return '#' + [r, g, b].map(n => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0')).join('');
+                    return '#' + [r,g,b].map(n => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0')).join('');
                 }
             }
             return fallback;
@@ -99,8 +97,7 @@ Plugin.register('brfx', {
             if (!light || !position) return;
             light.position.copy(position);
             light.distance = plugin.baseLightDistance * plugin.getBillboardScale(plugin.lightBillboard);
-            light.updateMatrixWorld(true);
-            plugin.refresh();
+            light.updateMatrixWorld(true); plugin.refresh();
         };
         plugin.startLightSync = function() {
             if (plugin.lightSyncTimer) clearInterval(plugin.lightSyncTimer);
@@ -113,8 +110,7 @@ Plugin.register('brfx', {
             plugin.baseLightDistance = Number.isFinite(distance) ? distance : 40;
             plugin.baseBillboardSize = 4;
             const billboard = new Billboard({name:'BRFX Light Source', position:[v.x,v.y,v.z], size:[4,4], visibility:true, export:false}).init();
-            billboard.addTo(); billboard.select(); plugin.lightBillboard = billboard; plugin.startLightSync();
-            return billboard;
+            billboard.addTo(); billboard.select(); plugin.lightBillboard = billboard; plugin.startLightSync(); return billboard;
         };
         plugin.removeSceneLights = function() {
             if (plugin.lightSyncTimer) clearInterval(plugin.lightSyncTimer);
@@ -127,24 +123,10 @@ Plugin.register('brfx', {
             if (!targetScene || typeof THREE === 'undefined' || !THREE.PointLight) return null;
             plugin.removeSceneLights();
             const color = new THREE.Color(plugin.normalizeColor(options.color, '#ffe0b2'));
-            const intensity = Number.isFinite(options.intensity) ? options.intensity : 3;
-            const distance = Number.isFinite(options.distance) ? options.distance : 32;
-            plugin.baseLightDistance = distance;
-            const light = new THREE.PointLight(color, intensity, distance, 2);
+            const light = new THREE.PointLight(color, Number.isFinite(options.intensity) ? options.intensity : 3, Number.isFinite(options.distance) ? options.distance : 32, 2);
             light.name = 'BRFX_Environment_Point_Light'; light.castShadow = false;
             light.position.copy(options.position || plugin.getModelCenter().clone().add(new THREE.Vector3(0,8,6)));
-            targetScene.add(light); plugin.sceneLights.push(light); plugin.createLightBillboard(light.position, distance); plugin.refresh();
-            return light;
-        };
-        plugin.addSoftEnvironment = function() {
-            const c = plugin.getModelCenter(); plugin.addPointLight({color:'#ffd7ad',intensity:4,distance:40,position:c.clone().add(new THREE.Vector3(0,8,6))});
-            if (typeof Sun !== 'undefined' && Sun) { Sun.color.set('#fff1df'); Sun.intensity = .65; }
-            Blockbench.showQuickMessage('BRFX: Light Source billboard created — move or scale it to control the light', 3500);
-        };
-        plugin.addCoolEnvironment = function() {
-            const c = plugin.getModelCenter(); plugin.addPointLight({color:'#9ec5ff',intensity:4,distance:40,position:c.clone().add(new THREE.Vector3(0,8,-6))});
-            if (typeof Sun !== 'undefined' && Sun) { Sun.color.set('#dbe9ff'); Sun.intensity = .45; }
-            Blockbench.showQuickMessage('BRFX: Cool Light Source billboard created — move or scale it to control the light', 3500);
+            targetScene.add(light); plugin.sceneLights.push(light); plugin.createLightBillboard(light.position, light.distance); plugin.refresh(); return light;
         };
 
         plugin.removeSkyDome = function() {
@@ -157,17 +139,27 @@ Plugin.register('brfx', {
             const top=plugin.normalizeColor(colors.top || plugin.customSettings.skyTop,'#4f82c4');
             const horizon=plugin.normalizeColor(colors.horizon || plugin.customSettings.skyHorizon,'#ffd6a0');
             const bottom=plugin.normalizeColor(colors.bottom || plugin.customSettings.skyBottom,'#6f5748');
+            const topWeight=Math.max(0,Math.min(100,Number(colors.topWeight ?? plugin.customSettings.skyTopWeight) || 0));
+            const horizonWeight=Math.max(0,Math.min(100,Number(colors.horizonWeight ?? plugin.customSettings.skyHorizonWeight) || 0));
+            const bottomWeight=Math.max(0,Math.min(100,Number(colors.bottomWeight ?? plugin.customSettings.skyBottomWeight) || 0));
+            const total=Math.max(0.001,topWeight+horizonWeight+bottomWeight);
+            const topStop=(bottomWeight+topWeight)/total;
+            const horizonStop=bottomWeight/total;
             const geometry=new THREE.BoxGeometry(2,2,2);
             const vertexShader=`varying vec3 vDirection; void main(){ vDirection=position; mat4 v=viewMatrix; v[3][0]=0.0; v[3][1]=0.0; v[3][2]=0.0; gl_Position=projectionMatrix*v*vec4(position,1.0); gl_Position.z=gl_Position.w; }`;
-            const fragmentShader=`uniform vec3 topColor; uniform vec3 horizonColor; uniform vec3 bottomColor; varying vec3 vDirection; void main(){ float h=clamp(vDirection.y*0.5+0.5,0.0,1.0); vec3 c=h<0.5?mix(bottomColor,horizonColor,smoothstep(0.0,0.5,h)):mix(horizonColor,topColor,smoothstep(0.5,1.0,h)); gl_FragColor=vec4(c,1.0); }`;
-            const material=new THREE.ShaderMaterial({uniforms:{topColor:{value:new THREE.Color(top)},horizonColor:{value:new THREE.Color(horizon)},bottomColor:{value:new THREE.Color(bottom)}},vertexShader,fragmentShader,side:THREE.BackSide,depthWrite:false,depthTest:false,fog:false,toneMapped:false});
+            const fragmentShader=`uniform vec3 topColor; uniform vec3 horizonColor; uniform vec3 bottomColor; uniform float topStop; uniform float horizonStop; varying vec3 vDirection; void main(){ float h=clamp(vDirection.y*0.5+0.5,0.0,1.0); vec3 c; if(h<horizonStop){ float t=smoothstep(0.0,max(0.0001,horizonStop),h); c=mix(bottomColor,horizonColor,t); } else { float t=smoothstep(horizonStop,max(horizonStop+0.0001,topStop),h); c=mix(horizonColor,topColor,t); } gl_FragColor=vec4(c,1.0); }`;
+            const material=new THREE.ShaderMaterial({uniforms:{topColor:{value:new THREE.Color(top)},horizonColor:{value:new THREE.Color(horizon)},bottomColor:{value:new THREE.Color(bottom)},topStop:{value:topStop},horizonStop:{value:horizonStop}},vertexShader,fragmentShader,side:THREE.BackSide,depthWrite:false,depthTest:false,fog:false,toneMapped:false});
             const skybox=new THREE.Mesh(geometry,material); skybox.name='BRFX_Procedural_Sky_Dome'; skybox.frustumCulled=false; skybox.renderOrder=-100000; targetScene.add(skybox); plugin.skyDome=skybox; plugin.refresh(); return skybox;
         };
-        plugin.updateSkyColors=function(top,horizon,bottom){
+        plugin.updateSkyColors=function(top,horizon,bottom,topWeight,horizonWeight,bottomWeight){
             top=plugin.normalizeColor(top,plugin.customSettings.skyTop); horizon=plugin.normalizeColor(horizon,plugin.customSettings.skyHorizon); bottom=plugin.normalizeColor(bottom,plugin.customSettings.skyBottom);
             plugin.customSettings.skyTop=top; plugin.customSettings.skyHorizon=horizon; plugin.customSettings.skyBottom=bottom;
+            if(Number.isFinite(Number(topWeight))) plugin.customSettings.skyTopWeight=Math.max(0,Math.min(100,Number(topWeight)));
+            if(Number.isFinite(Number(horizonWeight))) plugin.customSettings.skyHorizonWeight=Math.max(0,Math.min(100,Number(horizonWeight)));
+            if(Number.isFinite(Number(bottomWeight))) plugin.customSettings.skyBottomWeight=Math.max(0,Math.min(100,Number(bottomWeight)));
             if(plugin.skyDome && plugin.skyDome.material && plugin.skyDome.material.uniforms){
-                plugin.skyDome.material.uniforms.topColor.value.set(top); plugin.skyDome.material.uniforms.horizonColor.value.set(horizon); plugin.skyDome.material.uniforms.bottomColor.value.set(bottom); plugin.refresh();
+                const u=plugin.skyDome.material.uniforms, tw=plugin.customSettings.skyTopWeight, hw=plugin.customSettings.skyHorizonWeight, bw=plugin.customSettings.skyBottomWeight, total=Math.max(.001,tw+hw+bw);
+                u.topColor.value.set(top); u.horizonColor.value.set(horizon); u.bottomColor.value.set(bottom); u.topStop.value=(bw+tw)/total; u.horizonStop.value=bw/total; plugin.refresh();
             }
         };
         plugin.applyCustomLight=function(settings,showMessage=true){
@@ -176,6 +168,9 @@ Plugin.register('brfx', {
             plugin.customSettings.skyTop=plugin.normalizeColor(plugin.customSettings.skyTop,'#4f82c4');
             plugin.customSettings.skyHorizon=plugin.normalizeColor(plugin.customSettings.skyHorizon,'#ffd6a0');
             plugin.customSettings.skyBottom=plugin.normalizeColor(plugin.customSettings.skyBottom,'#6f5748');
+            plugin.customSettings.skyTopWeight=Math.max(0,Math.min(100,Number(plugin.customSettings.skyTopWeight)||0));
+            plugin.customSettings.skyHorizonWeight=Math.max(0,Math.min(100,Number(plugin.customSettings.skyHorizonWeight)||0));
+            plugin.customSettings.skyBottomWeight=Math.max(0,Math.min(100,Number(plugin.customSettings.skyBottomWeight)||0));
             if(plugin.customSettings.lightType==='environment'){
                 const c=plugin.getModelCenter(); plugin.addPointLight({color:plugin.customSettings.lightColor,intensity:Math.max(0,Number(plugin.customSettings.environmentIntensity)||0),distance:Math.max(1,Number(plugin.customSettings.environmentDistance)||1),position:c.clone().add(new THREE.Vector3(0,8,6))});
                 if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#ffffff');Sun.intensity=0;}
@@ -183,7 +178,7 @@ Plugin.register('brfx', {
                 plugin.removeSceneLights(); Canvas.global_light_color.set(plugin.customSettings.lightColor); Canvas.global_light_side=Number(plugin.customSettings.lightSide)||0;
                 if(typeof Sun!=='undefined'&&Sun){Sun.color.set(plugin.customSettings.lightColor);Sun.intensity=Math.max(0,Number(plugin.customSettings.lightIntensity)||0);} plugin.refresh();
             }
-            if(plugin.customSettings.skyEnabled) plugin.skyDome ? plugin.updateSkyColors(plugin.customSettings.skyTop,plugin.customSettings.skyHorizon,plugin.customSettings.skyBottom) : plugin.createSkyDome({top:plugin.customSettings.skyTop,horizon:plugin.customSettings.skyHorizon,bottom:plugin.customSettings.skyBottom}); else plugin.removeSkyDome();
+            if(plugin.customSettings.skyEnabled) plugin.skyDome ? plugin.updateSkyColors(plugin.customSettings.skyTop,plugin.customSettings.skyHorizon,plugin.customSettings.skyBottom,plugin.customSettings.skyTopWeight,plugin.customSettings.skyHorizonWeight,plugin.customSettings.skyBottomWeight) : plugin.createSkyDome({top:plugin.customSettings.skyTop,horizon:plugin.customSettings.skyHorizon,bottom:plugin.customSettings.skyBottom,topWeight:plugin.customSettings.skyTopWeight,horizonWeight:plugin.customSettings.skyHorizonWeight,bottomWeight:plugin.customSettings.skyBottomWeight}); else plugin.removeSkyDome();
             if(showMessage)Blockbench.showQuickMessage('BRFX: Custom Light settings applied',2500);
         };
         plugin.openCustomLight=function(){
@@ -196,33 +191,38 @@ Plugin.register('brfx', {
                 environmentIntensity:{label:'Environment Intensity',type:'number',value:plugin.customSettings.environmentIntensity,min:0,max:20,step:.1,condition:f=>f.lightType==='environment'},
                 environmentDistance:{label:'Environment Range',type:'number',value:plugin.customSettings.environmentDistance,min:1,max:500,step:1,condition:f=>f.lightType==='environment'},
                 skyEnabled:{label:'Enable Custom Skybox',type:'checkbox',value:plugin.customSettings.skyEnabled},
-                skyTop:{label:'Sky Top Color',type:'color',value:plugin.customSettings.skyTop,condition:f=>f.skyEnabled},
-                skyHorizon:{label:'Sky Horizon Color',type:'color',value:plugin.customSettings.skyHorizon,condition:f=>f.skyEnabled},
-                skyBottom:{label:'Sky Bottom Color',type:'color',value:plugin.customSettings.skyBottom,condition:f=>f.skyEnabled}
-            },onConfirm(form){plugin.applyCustomLight({lightType:form.lightType,lightColor:form.lightColor,lightSide:Number(form.lightSide)||0,lightIntensity:Number(form.lightIntensity)||0,environmentIntensity:Number(form.environmentIntensity)||0,environmentDistance:Number(form.environmentDistance)||1,skyEnabled:!!form.skyEnabled,skyTop:form.skyTop,skyHorizon:form.skyHorizon,skyBottom:form.skyBottom});}}).show();
+                skyTop:{label:'Main Color (Sky Top)',type:'color',value:plugin.customSettings.skyTop,condition:f=>f.skyEnabled},
+                skyTopWeight:{label:'Main Color Amount (%)',type:'number',value:plugin.customSettings.skyTopWeight,min:0,max:100,step:1,condition:f=>f.skyEnabled},
+                skyHorizon:{label:'Connection Color (Sky Horizon)',type:'color',value:plugin.customSettings.skyHorizon,condition:f=>f.skyEnabled},
+                skyHorizonWeight:{label:'Connection Color Amount (%)',type:'number',value:plugin.customSettings.skyHorizonWeight,min:0,max:100,step:1,condition:f=>f.skyEnabled},
+                skyBottom:{label:'Bottom Color',type:'color',value:plugin.customSettings.skyBottom,condition:f=>f.skyEnabled},
+                skyBottomWeight:{label:'Bottom Color Amount (%)',type:'number',value:plugin.customSettings.skyBottomWeight,min:0,max:100,step:1,condition:f=>f.skyEnabled}
+            },onConfirm(form){plugin.applyCustomLight({lightType:form.lightType,lightColor:form.lightColor,lightSide:Number(form.lightSide)||0,lightIntensity:Number(form.lightIntensity)||0,environmentIntensity:Number(form.environmentIntensity)||0,environmentDistance:Number(form.environmentDistance)||1,skyEnabled:!!form.skyEnabled,skyTop:form.skyTop,skyHorizon:form.skyHorizon,skyBottom:form.skyBottom,skyTopWeight:Number(form.skyTopWeight)||0,skyHorizonWeight:Number(form.skyHorizonWeight)||0,skyBottomWeight:Number(form.skyBottomWeight)||0});}}).show();
         };
         plugin.addAction=function(id,name,icon,click){const a=new Action(id,{name,icon,click});if(MenuBar&&MenuBar.menus&&MenuBar.menus.tools)MenuBar.menus.tools.addAction(a);plugin.actionIds=plugin.actionIds||[];plugin.actionIds.push(id);};
         plugin.addAction('brfx_warm_sun','BRFX — Warm Sun','wb_sunny',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#ffad52');Canvas.global_light_side=0;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#ffad52');Sun.intensity=1;}plugin.refresh();});
         plugin.addAction('brfx_neutral_daylight','BRFX — Neutral Daylight','light_mode',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#ffffff');Canvas.global_light_side=0;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#ffffff');Sun.intensity=1;}plugin.refresh();});
-        plugin.addAction('brfx_moonlight','BRFX — Moonlight','nightlight',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#6ea8ff');Canvas.global_light_side=1;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#6ea8ff');Sun.intensity=.8;}plugin.refresh();});
-        plugin.addAction('brfx_cinematic_purple','BRFX — Cinematic Purple','palette',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#a878ff');Canvas.global_light_side=1;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#a878ff');Sun.intensity=.9;}plugin.refresh();});
-        plugin.addAction('brfx_environment_light','BRFX — Real Environment Light','lightbulb',()=>plugin.addSoftEnvironment());
-        plugin.addAction('brfx_cool_environment','BRFX — Real Cool Environment','lightbulb_outline',()=>plugin.addCoolEnvironment());
+        plugin.addAction('brfx_moonlight','BRFX — Moonlight','nights_stay',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#6ea8ff');Canvas.global_light_side=1;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#6ea8ff');Sun.intensity=1;}plugin.refresh();});
+        plugin.addAction('brfx_cinematic_purple','BRFX — Cinematic Purple','movie_filter',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#a878ff');Canvas.global_light_side=1;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#a878ff');Sun.intensity=1;}plugin.refresh();});
+        plugin.addAction('brfx_environment_light','BRFX — Real Environment Light','lightbulb',()=>{const c=plugin.getModelCenter();plugin.addPointLight({color:'#ffd7ad',intensity:4,distance:40,position:c.clone().add(new THREE.Vector3(0,8,6))});if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#ffffff');Sun.intensity=0;}Blockbench.showQuickMessage('BRFX: Light Source billboard created — move or scale it to control the light',3500);});
+        plugin.addAction('brfx_cool_environment','BRFX — Real Cool Environment','ac_unit',()=>{const c=plugin.getModelCenter();plugin.addPointLight({color:'#9ec5ff',intensity:4,distance:40,position:c.clone().add(new THREE.Vector3(0,8,-6))});if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#ffffff');Sun.intensity=0;}Blockbench.showQuickMessage('BRFX: Cool Light Source billboard created — move or scale it to control the light',3500);});
         plugin.addAction('brfx_custom_light','BRFX-Costom Light','tune',()=>plugin.openCustomLight());
-        plugin.addAction('brfx_sky_dome','BRFX — Procedural Sky Dome','cloud',()=>plugin.createSkyDome());
+        plugin.addAction('brfx_procedural_sky','BRFX — Procedural Sky Dome','cloud',()=>plugin.createSkyDome());
         plugin.addAction('brfx_remove_sky','BRFX — Remove Sky Dome','cloud_off',()=>plugin.removeSkyDome());
-        plugin.addAction('brfx_restore_lighting','BRFX — Restore Lighting','restore',()=>{plugin.removeSceneLights();Canvas.global_light_color.copy(plugin.originalLightColor);Canvas.global_light_side=plugin.originalLightSide;if(typeof Sun!=='undefined'&&Sun){Sun.color.copy(plugin.originalLightColor);if(plugin.originalSunIntensity!==null)Sun.intensity=plugin.originalSunIntensity;}plugin.refresh();});
-        plugin.createSkyDome();
+        plugin.addAction('brfx_restore_lighting','BRFX — Restore Lighting','restore',()=>{plugin.removeSceneLights();Canvas.global_light_color.copy(plugin.originalLightColor);Canvas.global_light_side=plugin.originalLightSide;if(typeof Sun!=='undefined'&&Sun&&plugin.originalSunIntensity!==null)Sun.intensity=plugin.originalSunIntensity;plugin.removeSkyDome();plugin.refresh();Blockbench.showQuickMessage('BRFX: Original lighting restored',2500);});
+        plugin.addAction('brfx_custom_light_settings','BRFX-Costom Light Settings','settings',()=>plugin.openCustomLight());
+        Blockbench.showQuickMessage('BRFX 0.9.6 loaded — Sky color distribution controls added',3000);
     },
-    onunload(){
-        if(this.customDialog)try{this.customDialog.hide();}catch(e){}
-        if(this.lightSyncTimer)clearInterval(this.lightSyncTimer); this.lightSyncTimer=null; this.removeLightBillboard();
-        if(this.skyDome){const s=this.skyDome;if(s.parent)s.parent.remove(s);if(s.geometry)s.geometry.dispose();if(s.material)s.material.dispose();this.skyDome=null;}
-        if(this.sceneLights)this.sceneLights.forEach(l=>{if(l&&l.parent)l.parent.remove(l);});
-        if(this.sceneLights)this.sceneLights.length=0;
-        Canvas.global_light_color.copy(this.originalLightColor);Canvas.global_light_side=this.originalLightSide;
-        if(typeof Sun!=='undefined'&&Sun){Sun.color.copy(this.originalLightColor);if(this.originalSunIntensity!==null)Sun.intensity=this.originalSunIntensity;}
-        if(this.actionIds)this.actionIds.forEach(id=>{try{BarItems[id]?.delete();}catch(e){}});
-        if(typeof Canvas.updateAllFaces==='function')Canvas.updateAllFaces();
+
+    onunload() {
+        const plugin=this;
+        if(plugin.lightSyncTimer)clearInterval(plugin.lightSyncTimer);
+        if(plugin.sceneLights)plugin.sceneLights.forEach(light=>{if(light&&light.parent)light.parent.remove(light);});
+        if(plugin.lightBillboard)try{plugin.lightBillboard.remove();}catch(e){}
+        if(plugin.skyDome){if(plugin.skyDome.parent)plugin.skyDome.parent.remove(plugin.skyDome);if(plugin.skyDome.geometry)plugin.skyDome.geometry.dispose();if(plugin.skyDome.material)plugin.skyDome.material.dispose();}
+        if(Canvas&&plugin.originalLightColor){Canvas.global_light_color.copy(plugin.originalLightColor);Canvas.global_light_side=plugin.originalLightSide;}
+        if(typeof Sun!=='undefined'&&Sun&&plugin.originalSunIntensity!==null)Sun.intensity=plugin.originalSunIntensity;
+        if(plugin.actionIds)plugin.actionIds.forEach(id=>{try{Blockbench.removeAction(id);}catch(e){}});
+        plugin.refresh&&plugin.refresh();
     }
 });

@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Scene Lighting Pass v0.5.0
+ * Scene Lighting Pass v0.6.0
  *
  * MIT License — see LICENSE
  */
@@ -9,8 +9,8 @@ Plugin.register('brfx', {
     title: 'BRFX — Scene Lighting',
     author: 'Yama Sung',
     icon: 'auto_awesome',
-    description: 'Scene-aware lighting presets with real Three.js lights for the Blockbench viewport.',
-    version: '0.5.0',
+    description: 'Scene-aware lighting with movable Blockbench light-source controls.',
+    version: '0.6.0',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -18,6 +18,8 @@ Plugin.register('brfx', {
     onload() {
         const plugin = this;
         plugin.sceneLights = [];
+        plugin.lightLocator = null;
+        plugin.lightSyncTimer = null;
         plugin.originalLightColor = Canvas.global_light_color.clone();
         plugin.originalLightSide = Canvas.global_light_side;
         plugin.originalSunIntensity = (typeof Sun !== 'undefined' && Sun) ? Sun.intensity : null;
@@ -52,12 +54,60 @@ Plugin.register('brfx', {
             return center;
         };
 
+        plugin.removeLightLocator = function() {
+            if (plugin.lightLocator) {
+                try { plugin.lightLocator.remove(); } catch (error) { /* already removed */ }
+                plugin.lightLocator = null;
+            }
+        };
+
+        plugin.syncLightToLocator = function() {
+            if (!plugin.lightLocator || !plugin.sceneLights.length) return;
+            const light = plugin.sceneLights[0];
+            if (!light) return;
+
+            const position = plugin.lightLocator.getWorldCenter();
+            if (!position) return;
+
+            light.position.copy(position);
+            light.updateMatrixWorld(true);
+            plugin.refresh();
+        };
+
+        plugin.startLightSync = function() {
+            if (plugin.lightSyncTimer) clearInterval(plugin.lightSyncTimer);
+            plugin.lightSyncTimer = setInterval(() => {
+                plugin.syncLightToLocator();
+            }, 50);
+        };
+
+        plugin.createLightLocator = function(position) {
+            plugin.removeLightLocator();
+            if (typeof Locator === 'undefined') {
+                Blockbench.showQuickMessage('BRFX: Blockbench locators are unavailable', 3000);
+                return null;
+            }
+
+            const vector = position || plugin.getModelCenter().clone().add(new THREE.Vector3(0, 8, 6));
+            const locator = new Locator({
+                name: 'BRFX Light Source',
+                from: [vector.x, vector.y, vector.z],
+            }).init();
+
+            locator.addTo();
+            locator.select();
+            plugin.lightLocator = locator;
+            plugin.startLightSync();
+            return locator;
+        };
+
         plugin.removeSceneLights = function() {
             plugin.sceneLights.forEach(light => {
                 if (light && light.parent) light.parent.remove(light);
                 if (light && light.target && light.target.parent) light.target.parent.remove(light.target);
             });
             plugin.sceneLights.length = 0;
+            plugin.removeLightLocator();
             plugin.refresh();
         };
 
@@ -75,9 +125,11 @@ Plugin.register('brfx', {
             const light = new THREE.PointLight(color, intensity, distance, 2);
             light.name = 'BRFX_Environment_Point_Light';
             light.castShadow = false;
-            light.position.copy(options.position || plugin.getModelCenter());
+            const position = options.position || plugin.getModelCenter().clone().add(new THREE.Vector3(0, 8, 6));
+            light.position.copy(position);
             targetScene.add(light);
             plugin.sceneLights.push(light);
+            plugin.createLightLocator(position);
             plugin.refresh();
             return light;
         };
@@ -94,7 +146,7 @@ Plugin.register('brfx', {
                 Sun.color.set('#fff1df');
                 if (typeof Sun.intensity === 'number') Sun.intensity = 0.65;
             }
-            Blockbench.showQuickMessage('BRFX: Real scene environment light enabled', 3000);
+            Blockbench.showQuickMessage('BRFX: Light Source created — move the locator to position it', 3500);
         };
 
         plugin.addCoolEnvironment = function() {
@@ -109,7 +161,7 @@ Plugin.register('brfx', {
                 Sun.color.set('#dbe9ff');
                 if (typeof Sun.intensity === 'number') Sun.intensity = 0.45;
             }
-            Blockbench.showQuickMessage('BRFX: Cool scene environment light enabled', 3000);
+            Blockbench.showQuickMessage('BRFX: Cool Light Source created — move the locator to position it', 3500);
         };
 
         plugin.restoreLight = function(showMessage = true) {
@@ -180,21 +232,21 @@ Plugin.register('brfx', {
 
         plugin.environmentAction = new Action('brfx_real_environment', {
             name: 'BRFX — Real Environment Light',
-            description: 'Add a real point light to the viewport scene so nearby model surfaces receive light from its position.',
+            description: 'Create a real point light and a movable BRFX Light Source locator.',
             icon: 'wb_sunny',
             click() { plugin.addSoftEnvironment(); },
         });
 
         plugin.coolEnvironmentAction = new Action('brfx_real_cool_environment', {
             name: 'BRFX — Real Cool Environment',
-            description: 'Add a real cool point light to the viewport scene for nearby environmental illumination.',
+            description: 'Create a cool point light with a movable BRFX Light Source locator.',
             icon: 'nightlight',
             click() { plugin.addCoolEnvironment(); },
         });
 
         plugin.restoreAction = new Action('brfx_restore_light', {
             name: 'BRFX — Restore Lighting',
-            description: 'Remove BRFX scene lights and restore Blockbench lighting.',
+            description: 'Remove BRFX scene lights and their control locator.',
             icon: 'restart_alt',
             click() { plugin.restoreLight(); },
         });
@@ -215,6 +267,8 @@ Plugin.register('brfx', {
     },
 
     onunload() {
+        if (this.lightSyncTimer) clearInterval(this.lightSyncTimer);
+        this.lightSyncTimer = null;
         if (this.restoreLight) this.restoreLight(false);
         if (this.warmAction) this.warmAction.delete();
         if (this.neutralAction) this.neutralAction.delete();
@@ -231,9 +285,14 @@ Plugin.register('brfx', {
         this.coolEnvironmentAction = null;
         this.restoreAction = null;
         this.sceneLights = null;
+        this.lightLocator = null;
         this.refresh = null;
         this.getScene = null;
         this.getModelCenter = null;
+        this.removeLightLocator = null;
+        this.syncLightToLocator = null;
+        this.startLightSync = null;
+        this.createLightLocator = null;
         this.removeSceneLights = null;
         this.addPointLight = null;
         this.addSoftEnvironment = null;

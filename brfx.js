@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Custom Sky Color Fix Pass v0.9.4
+ * Custom Sky Color Fix Pass v0.9.5
  *
  * MIT License — see LICENSE
  */
@@ -10,7 +10,7 @@ Plugin.register('brfx', {
     author: 'Yama Sung',
     icon: 'auto_awesome',
     description: 'Custom light types, colors, intensity, and a fully customizable 3-color skybox.',
-    version: '0.9.4',
+    version: '0.9.5',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -33,14 +33,25 @@ Plugin.register('brfx', {
             skyEnabled: true, skyTop: '#4f82c4', skyHorizon: '#ffd6a0', skyBottom: '#6f5748'
         };
 
+        // Blockbench's color form returns a tinycolor.Instance.
+        // Normalize every common color representation to a CSS color string.
         plugin.normalizeColor = function(value, fallback) {
-            if (value && value.isColor) return '#' + value.getHexString();
+            if (value == null) return fallback;
+            try {
+                if (typeof value.toHexString === 'function') return value.toHexString();
+                if (typeof value.toHex8String === 'function') return value.toHex8String();
+            } catch (error) {}
+            if (value && value.isColor && typeof value.getHexString === 'function') return '#' + value.getHexString();
             if (typeof value === 'string') {
                 const text = value.trim();
                 if (/^#[0-9a-f]{3,8}$/i.test(text) || /^(rgb|hsl)a?\(/i.test(text) || /^[a-z]+$/i.test(text)) return text;
+                if (/^[0-9a-f]{6,8}$/i.test(text)) return '#' + text;
             }
             if (value && typeof value === 'object') {
                 if (typeof value.hex === 'string') return plugin.normalizeColor(value.hex, fallback);
+                if (typeof value.toRgb === 'function') {
+                    try { return plugin.normalizeColor(value.toRgb(), fallback); } catch (error) {}
+                }
                 if (Number.isFinite(value.r) && Number.isFinite(value.g) && Number.isFinite(value.b)) {
                     const r = value.r <= 1 ? value.r * 255 : value.r;
                     const g = value.g <= 1 ? value.g * 255 : value.g;
@@ -191,16 +202,16 @@ Plugin.register('brfx', {
             },onConfirm(form){plugin.applyCustomLight({lightType:form.lightType,lightColor:form.lightColor,lightSide:Number(form.lightSide)||0,lightIntensity:Number(form.lightIntensity)||0,environmentIntensity:Number(form.environmentIntensity)||0,environmentDistance:Number(form.environmentDistance)||1,skyEnabled:!!form.skyEnabled,skyTop:form.skyTop,skyHorizon:form.skyHorizon,skyBottom:form.skyBottom});}}).show();
         };
         plugin.addAction=function(id,name,icon,click){const a=new Action(id,{name,icon,click});if(MenuBar&&MenuBar.menus&&MenuBar.menus.tools)MenuBar.menus.tools.addAction(a);plugin.actionIds=plugin.actionIds||[];plugin.actionIds.push(id);};
-        plugin.addAction('brfx_warm_sun','BRFX — Warm Sun','wb_sunny',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#ffad52');Canvas.global_light_side=0;if(Sun){Sun.color.set('#ffad52');Sun.intensity=1;}plugin.refresh();});
-        plugin.addAction('brfx_neutral_daylight','BRFX — Neutral Daylight','light_mode',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#ffffff');Canvas.global_light_side=0;if(Sun){Sun.color.set('#ffffff');Sun.intensity=1;}plugin.refresh();});
-        plugin.addAction('brfx_moonlight','BRFX — Moonlight','nightlight',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#6ea8ff');Canvas.global_light_side=1;if(Sun){Sun.color.set('#6ea8ff');Sun.intensity=.8;}plugin.refresh();});
-        plugin.addAction('brfx_cinematic_purple','BRFX — Cinematic Purple','palette',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#a878ff');Canvas.global_light_side=1;if(Sun){Sun.color.set('#a878ff');Sun.intensity=.9;}plugin.refresh();});
+        plugin.addAction('brfx_warm_sun','BRFX — Warm Sun','wb_sunny',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#ffad52');Canvas.global_light_side=0;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#ffad52');Sun.intensity=1;}plugin.refresh();});
+        plugin.addAction('brfx_neutral_daylight','BRFX — Neutral Daylight','light_mode',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#ffffff');Canvas.global_light_side=0;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#ffffff');Sun.intensity=1;}plugin.refresh();});
+        plugin.addAction('brfx_moonlight','BRFX — Moonlight','nightlight',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#6ea8ff');Canvas.global_light_side=1;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#6ea8ff');Sun.intensity=.8;}plugin.refresh();});
+        plugin.addAction('brfx_cinematic_purple','BRFX — Cinematic Purple','palette',()=>{plugin.removeSceneLights();Canvas.global_light_color.set('#a878ff');Canvas.global_light_side=1;if(typeof Sun!=='undefined'&&Sun){Sun.color.set('#a878ff');Sun.intensity=.9;}plugin.refresh();});
         plugin.addAction('brfx_environment_light','BRFX — Real Environment Light','lightbulb',()=>plugin.addSoftEnvironment());
         plugin.addAction('brfx_cool_environment','BRFX — Real Cool Environment','lightbulb_outline',()=>plugin.addCoolEnvironment());
         plugin.addAction('brfx_custom_light','BRFX-Costom Light','tune',()=>plugin.openCustomLight());
         plugin.addAction('brfx_sky_dome','BRFX — Procedural Sky Dome','cloud',()=>plugin.createSkyDome());
         plugin.addAction('brfx_remove_sky','BRFX — Remove Sky Dome','cloud_off',()=>plugin.removeSkyDome());
-        plugin.addAction('brfx_restore_lighting','BRFX — Restore Lighting','restore',()=>{plugin.removeSceneLights();Canvas.global_light_color.copy(plugin.originalLightColor);Canvas.global_light_side=plugin.originalLightSide;if(Sun){Sun.color.copy(plugin.originalLightColor);if(plugin.originalSunIntensity!==null)Sun.intensity=plugin.originalSunIntensity;}plugin.refresh();});
+        plugin.addAction('brfx_restore_lighting','BRFX — Restore Lighting','restore',()=>{plugin.removeSceneLights();Canvas.global_light_color.copy(plugin.originalLightColor);Canvas.global_light_side=plugin.originalLightSide;if(typeof Sun!=='undefined'&&Sun){Sun.color.copy(plugin.originalLightColor);if(plugin.originalSunIntensity!==null)Sun.intensity=plugin.originalSunIntensity;}plugin.refresh();});
         plugin.createSkyDome();
     },
     onunload(){

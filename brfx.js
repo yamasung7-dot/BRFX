@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Scene Lighting Pass v0.6.0
+ * Scene Lighting Pass v0.6.1
  *
  * MIT License — see LICENSE
  */
@@ -9,8 +9,8 @@ Plugin.register('brfx', {
     title: 'BRFX — Scene Lighting',
     author: 'Yama Sung',
     icon: 'auto_awesome',
-    description: 'Scene-aware lighting with movable Blockbench light-source controls.',
-    version: '0.6.0',
+    description: 'Scene-aware lighting with a movable Blockbench light-source control.',
+    version: '0.6.1',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -61,12 +61,36 @@ Plugin.register('brfx', {
             }
         };
 
+        plugin.getLocatorPosition = function(locator) {
+            if (!locator) return null;
+
+            // Locator.from is the native Blockbench transform position. Using it
+            // directly keeps the BRFX Three.js light in the same coordinate space
+            // as the model and avoids a world-transform mismatch on moved locators.
+            if (Array.isArray(locator.from) && locator.from.length >= 3) {
+                return new THREE.Vector3(
+                    Number(locator.from[0]) || 0,
+                    Number(locator.from[1]) || 0,
+                    Number(locator.from[2]) || 0
+                );
+            }
+
+            if (typeof locator.getWorldCenter === 'function') {
+                const position = locator.getWorldCenter();
+                if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
+                    return position.clone();
+                }
+            }
+
+            return null;
+        };
+
         plugin.syncLightToLocator = function() {
             if (!plugin.lightLocator || !plugin.sceneLights.length) return;
             const light = plugin.sceneLights[0];
             if (!light) return;
 
-            const position = plugin.lightLocator.getWorldCenter();
+            const position = plugin.getLocatorPosition(plugin.lightLocator);
             if (!position) return;
 
             light.position.copy(position);
@@ -289,6 +313,7 @@ Plugin.register('brfx', {
         this.refresh = null;
         this.getScene = null;
         this.getModelCenter = null;
+        this.getLocatorPosition = null;
         this.removeLightLocator = null;
         this.syncLightToLocator = null;
         this.startLightSync = null;

@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Ambient Light Pass v0.2.0
+ * Ambient Light Pass v0.3.0
  *
  * MIT License — see LICENSE
  */
@@ -9,8 +9,8 @@ Plugin.register('brfx', {
     title: 'BRFX — Ambient Light',
     author: 'Yama Sung',
     icon: 'auto_awesome',
-    description: 'A safe first Render FX pass: warm, neutral, and cool ambient viewport lighting.',
-    version: '0.2.0',
+    description: 'Visible ambient lighting presets for the Blockbench viewport.',
+    version: '0.3.0',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -30,6 +30,10 @@ Plugin.register('brfx', {
                 Canvas.updateAllFaces();
             }
 
+            if (typeof Sun !== 'undefined' && Sun && Sun.color) {
+                Sun.color.copy(Canvas.global_light_color);
+            }
+
             plugin.enabled = true;
             Blockbench.showQuickMessage(`BRFX: ${label}`, 2500);
         };
@@ -42,6 +46,10 @@ Plugin.register('brfx', {
                 Canvas.updateAllFaces();
             }
 
+            if (typeof Sun !== 'undefined' && Sun && Sun.color) {
+                Sun.color.copy(Canvas.global_light_color);
+            }
+
             plugin.enabled = false;
             if (showMessage) {
                 Blockbench.showQuickMessage('BRFX: Blockbench lighting restored', 2500);
@@ -49,29 +57,38 @@ Plugin.register('brfx', {
         };
 
         plugin.warmAction = new Action('brfx_warm_light', {
-            name: 'BRFX — Warm Ambient',
-            description: 'Apply a subtle warm ambient light tint.',
+            name: 'BRFX — Warm Sun',
+            description: 'Strong golden ambient light for a warm, sunny look.',
             icon: 'wb_sunny',
             click() {
-                plugin.applyLight('#fff1dc', 0, 'Warm ambient lighting enabled');
+                plugin.applyLight('#ffad52', 0, 'Warm Sun lighting enabled');
             },
         });
 
         plugin.neutralAction = new Action('brfx_neutral_light', {
-            name: 'BRFX — Neutral Ambient',
-            description: 'Apply a neutral daylight ambient light.',
+            name: 'BRFX — Neutral Daylight',
+            description: 'Restore a clean neutral daylight tint.',
             icon: 'light_mode',
             click() {
-                plugin.applyLight('#ffffff', 0, 'Neutral ambient lighting enabled');
+                plugin.applyLight('#ffffff', 0, 'Neutral Daylight enabled');
             },
         });
 
         plugin.coolAction = new Action('brfx_cool_light', {
-            name: 'BRFX — Cool Ambient',
-            description: 'Apply a subtle cool ambient light tint.',
+            name: 'BRFX — Moonlight',
+            description: 'Strong blue ambient light for a cool nighttime look.',
             icon: 'ac_unit',
             click() {
-                plugin.applyLight('#dbe9ff', 1, 'Cool ambient lighting enabled');
+                plugin.applyLight('#6ea8ff', 1, 'Moonlight enabled');
+            },
+        });
+
+        plugin.cinematicAction = new Action('brfx_cinematic_light', {
+            name: 'BRFX — Cinematic Purple',
+            description: 'A vivid purple-blue ambient tint for stylized scenes.',
+            icon: 'movie',
+            click() {
+                plugin.applyLight('#a878ff', 1, 'Cinematic Purple lighting enabled');
             },
         });
 
@@ -88,11 +105,11 @@ Plugin.register('brfx', {
             MenuBar.menus.tools.addAction(plugin.warmAction);
             MenuBar.menus.tools.addAction(plugin.neutralAction);
             MenuBar.menus.tools.addAction(plugin.coolAction);
+            MenuBar.menus.tools.addAction(plugin.cinematicAction);
             MenuBar.menus.tools.addAction(plugin.restoreAction);
         }
 
-        // Start with the warm preset so the first real Render FX pass is visible.
-        plugin.applyLight('#fff1dc', 0, 'Warm ambient lighting enabled');
+        plugin.applyLight('#ffad52', 0, 'Warm Sun lighting enabled');
     },
 
     onunload() {
@@ -103,11 +120,13 @@ Plugin.register('brfx', {
         if (this.warmAction) this.warmAction.delete();
         if (this.neutralAction) this.neutralAction.delete();
         if (this.coolAction) this.coolAction.delete();
+        if (this.cinematicAction) this.cinematicAction.delete();
         if (this.restoreAction) this.restoreAction.delete();
 
         this.warmAction = null;
         this.neutralAction = null;
         this.coolAction = null;
+        this.cinematicAction = null;
         this.restoreAction = null;
         this.applyLight = null;
         this.restoreLight = null;

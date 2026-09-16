@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Ambient Light Pass v0.3.0
+ * Ambient Light Pass v0.4.0
  *
  * MIT License — see LICENSE
  */
@@ -9,8 +9,8 @@ Plugin.register('brfx', {
     title: 'BRFX — Ambient Light',
     author: 'Yama Sung',
     icon: 'auto_awesome',
-    description: 'Visible ambient lighting presets for the Blockbench viewport.',
-    version: '0.3.0',
+    description: 'Visible ambient and environment-lighting presets for the Blockbench viewport.',
+    version: '0.4.0',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -20,20 +20,27 @@ Plugin.register('brfx', {
 
         plugin.originalLightColor = Canvas.global_light_color.clone();
         plugin.originalLightSide = Canvas.global_light_side;
+        plugin.originalSunIntensity = (typeof Sun !== 'undefined' && Sun) ? Sun.intensity : null;
         plugin.enabled = false;
 
-        plugin.applyLight = function(color, side, label) {
-            Canvas.global_light_color.set(color);
-            Canvas.global_light_side = side;
-
+        plugin.refresh = function() {
             if (typeof Canvas.updateAllFaces === 'function') {
                 Canvas.updateAllFaces();
             }
+        };
 
-            if (typeof Sun !== 'undefined' && Sun && Sun.color) {
-                Sun.color.copy(Canvas.global_light_color);
+        plugin.applyLight = function(color, side, label, intensity = null) {
+            Canvas.global_light_color.set(color);
+            Canvas.global_light_side = side;
+
+            if (typeof Sun !== 'undefined' && Sun) {
+                if (Sun.color) Sun.color.copy(Canvas.global_light_color);
+                if (intensity !== null && typeof Sun.intensity === 'number') {
+                    Sun.intensity = intensity;
+                }
             }
 
+            plugin.refresh();
             plugin.enabled = true;
             Blockbench.showQuickMessage(`BRFX: ${label}`, 2500);
         };
@@ -42,14 +49,14 @@ Plugin.register('brfx', {
             Canvas.global_light_color.copy(plugin.originalLightColor);
             Canvas.global_light_side = plugin.originalLightSide;
 
-            if (typeof Canvas.updateAllFaces === 'function') {
-                Canvas.updateAllFaces();
+            if (typeof Sun !== 'undefined' && Sun) {
+                if (Sun.color) Sun.color.copy(Canvas.global_light_color);
+                if (plugin.originalSunIntensity !== null && typeof Sun.intensity === 'number') {
+                    Sun.intensity = plugin.originalSunIntensity;
+                }
             }
 
-            if (typeof Sun !== 'undefined' && Sun && Sun.color) {
-                Sun.color.copy(Canvas.global_light_color);
-            }
-
+            plugin.refresh();
             plugin.enabled = false;
             if (showMessage) {
                 Blockbench.showQuickMessage('BRFX: Blockbench lighting restored', 2500);
@@ -79,7 +86,7 @@ Plugin.register('brfx', {
             description: 'Strong blue ambient light for a cool nighttime look.',
             icon: 'ac_unit',
             click() {
-                plugin.applyLight('#6ea8ff', 1, 'Moonlight enabled');
+                plugin.applyLight('#6ea8ff', 1, 'Moonlight lighting enabled');
             },
         });
 
@@ -89,6 +96,15 @@ Plugin.register('brfx', {
             icon: 'movie',
             click() {
                 plugin.applyLight('#a878ff', 1, 'Cinematic Purple lighting enabled');
+            },
+        });
+
+        plugin.immersiveAction = new Action('brfx_immersive_ambient', {
+            name: 'BRFX — Immersive Ambient',
+            description: 'Blend incoming objects into the scene with soft environment-style illumination.',
+            icon: 'blur_on',
+            click() {
+                plugin.applyLight('#ffe3c2', 0, 'Immersive Ambient enabled', 1.15);
             },
         });
 
@@ -106,6 +122,7 @@ Plugin.register('brfx', {
             MenuBar.menus.tools.addAction(plugin.neutralAction);
             MenuBar.menus.tools.addAction(plugin.coolAction);
             MenuBar.menus.tools.addAction(plugin.cinematicAction);
+            MenuBar.menus.tools.addAction(plugin.immersiveAction);
             MenuBar.menus.tools.addAction(plugin.restoreAction);
         }
 
@@ -121,15 +138,19 @@ Plugin.register('brfx', {
         if (this.neutralAction) this.neutralAction.delete();
         if (this.coolAction) this.coolAction.delete();
         if (this.cinematicAction) this.cinematicAction.delete();
+        if (this.immersiveAction) this.immersiveAction.delete();
         if (this.restoreAction) this.restoreAction.delete();
 
         this.warmAction = null;
         this.neutralAction = null;
         this.coolAction = null;
         this.cinematicAction = null;
+        this.immersiveAction = null;
         this.restoreAction = null;
         this.applyLight = null;
         this.restoreLight = null;
+        this.refresh = null;
         this.originalLightColor = null;
+        this.originalSunIntensity = null;
     },
 });

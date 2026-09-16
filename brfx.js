@@ -1,12 +1,12 @@
-/* BRFX — Blockbench Render FX — Focused Rendering Foundation v1.7.0 */
+/* BRFX — Blockbench Render FX — Billboard Light Controller Fix v1.7.1 */
 Plugin.register('brfx', {
   title:'BRFX — Render FX', author:'Yama Sung', icon:'auto_awesome',
   description:'Lighting, skybox, atmosphere, mobile optimization and internal glow effects.',
-  version:'1.7.0', variant:'both', min_version:'4.10.0', tags:['Rendering','Tools'],
+  version:'1.7.1', variant:'both', min_version:'4.10.0', tags:['Rendering','Tools'],
   onload(){
     const p=this;
     p.enabled=true; p.mobile=false; p.light=null; p.hemi=null; p.billboard=null; p.sky=null;
-    p.glowGroup=null; p.glowEntries=[]; p.fogStates=new Map();
+    p.glowGroup=null; p.glowEntries=[];
     p.settings={lightType:'environment',lightColor:'#ffad52',lightIntensity:1,lightSide:0,environmentIntensity:4,environmentDistance:40,skyEnabled:true,skyTop:'#4f82c4',skyHorizon:'#ffd6a0',skyBottom:'#6f5748',skyTopWeight:70,skyHorizonWeight:20,skyBottomWeight:10,fogEnabled:false,fogColor:'#b8a58f',fogNear:20,fogFar:180,quality:'medium',indirect:true,glowMode:'default',glowColor:'#ffb35c',glowIntensity:3,glowRange:20,glowHoleSize:.22};
     const msg=(t,ms=1800)=>{try{Blockbench.showQuickMessage(t,ms);}catch(e){}};
     const getScene=()=>{try{if(typeof Preview!=='undefined'&&Array.isArray(Preview.all)){if(Preview.selected?.scene)return Preview.selected.scene;const a=Preview.all.find(v=>v?.scene);if(a)return a.scene;}}catch(e){}try{return typeof window!=='undefined'?window.scene||null:null;}catch(e){return null;}};
@@ -15,15 +15,33 @@ Plugin.register('brfx', {
     const center=()=>{const c=new THREE.Vector3(),b=new THREE.Box3();let found=false;try{Outliner?.elements?.forEach(e=>{if(e?.mesh&&e.visibility!==false){e.mesh.updateMatrixWorld(true);const x=new THREE.Box3().setFromObject(e.mesh);if(!x.isEmpty()){b.union(x);found=true;}}});}catch(e){}if(found)b.getCenter(c);return c;};
     const meshes=()=>{const a=[];try{Preview?.all?.forEach(v=>v?.scene?.traverse?.(o=>{if(o?.isMesh&&!String(o.name||'').startsWith('BRFX_'))a.push(o);}));}catch(e){}return a;};
 
-    const clearLighting=()=>{try{p.light?.parent?.remove(p.light);}catch(e){}try{p.hemi?.parent?.remove(p.hemi);}catch(e){}try{p.billboard?.remove?.();}catch(e){}p.light=p.hemi=p.billboard=null;};
+    const removeBillboard=()=>{try{p.billboard?.remove?.();}catch(e){}p.billboard=null;};
+    const clearLighting=()=>{try{p.light?.parent?.remove(p.light);}catch(e){}try{p.hemi?.parent?.remove(p.hemi);}catch(e){}removeBillboard();p.light=p.hemi=null;};
+    const createBillboard=(l)=>{
+      removeBillboard();
+      if(typeof Billboard==='undefined')return false;
+      try{
+        if(Billboard.isTypePermitted && !Billboard.isTypePermitted('billboard'))return false;
+      }catch(e){}
+      try{
+        const b=new Billboard({name:'BRFX Light Source',position:[l.position.x,l.position.y,l.position.z],size:[4,4],visibility:true,export:false});
+        b.init();
+        b.addTo();
+        b.select();
+        p.billboard=b;
+        return true;
+      }catch(e){console.error('BRFX billboard',e);p.billboard=null;return false;}
+    };
     const createLight=()=>{
-      if(!p.enabled||p.settings.lightType!=='environment'||typeof THREE==='undefined')return;const s=getScene();if(!s)return;clearLighting();
+      if(!p.enabled||p.settings.lightType!=='environment'||typeof THREE==='undefined')return;
+      const s=getScene();if(!s)return;
+      clearLighting();
       const q=p.settings.quality==='low'?0.75:p.settings.quality==='high'?1.25:1,c=center();
       const l=new THREE.PointLight(new THREE.Color(col(p.settings.lightColor,'#ffad52')),Math.max(0,Number(p.settings.environmentIntensity)||4)*q,Math.max(1,Number(p.settings.environmentDistance)||40),2);
       l.name='BRFX_Environment_Point_Light';l.position.copy(c).add(new THREE.Vector3(0,8,6));s.add(l);p.light=l;
       if(p.settings.indirect){const h=new THREE.HemisphereLight(new THREE.Color(col(p.settings.skyTop,'#4f82c4')),new THREE.Color(col(p.settings.skyBottom,'#6f5748')),0.45*q);h.name='BRFX_Indirect_Ambient_Light';s.add(h);p.hemi=h;}
       try{if(typeof Sun!=='undefined'&&Sun)Sun.intensity=0;}catch(e){}
-      try{if(typeof Billboard!=='undefined'&&(!Billboard.isTypePermitted||Billboard.isTypePermitted('billboard'))){p.billboard=new Billboard({name:'BRFX Light Source',position:[l.position.x,l.position.y,l.position.z],size:[4,4],visibility:true,export:false}).init();p.billboard.addTo();p.billboard.select();}}catch(e){}
+      createBillboard(l);
     };
     const syncLight=()=>{if(!p.light||!p.billboard)return;try{const x=p.billboard.position||[0,0,0],z=p.billboard.size||[4,4],scale=Math.max(.1,(Math.abs(Number(z[0])||4)+Math.abs(Number(z[1])||4))/8);p.light.position.set(Number(x[0])||0,Number(x[1])||0,Number(x[2])||0);p.light.distance=Math.max(1,Number(p.settings.environmentDistance)||40)*scale;}catch(e){}};
     p._lightTimer=setInterval(syncLight,80);
@@ -49,7 +67,7 @@ Plugin.register('brfx', {
     const restore=()=>{clearLighting();removeSky();removeGlow();getScenes().forEach(s=>{try{s.fog=null;}catch(e){}});msg('BRFX effects restored');};
     const A={toggle:new Action('brfx_toggle',{name:'BRFX — On / Off',icon:'power_settings_new',click:toggle}),light:new Action('brfx_light',{name:'BRFX-Costom Light Settings',icon:'lightbulb',click:lightDialog}),internal:new Action('brfx_internal',{name:'BRFX — Internal Light',icon:'flare',click:internalLight}),atmos:new Action('brfx_atmos',{name:'BRFX — Atmosphere Settings',icon:'cloud',click:atmosphere}),fog:new Action('brfx_fog',{name:'BRFX — Remove Fog',icon:'cloud_off',click:()=>{p.settings.fogEnabled=false;fog();msg('BRFX fog removed');}}),restore:new Action('brfx_restore',{name:'BRFX — Restore Lighting',icon:'undo',click:restore})};
     const menu=()=>{try{const t=MenuBar?.menus?.tools;if(!t)return;t.structure=(t.structure||[]).filter(x=>x?.id!=='brfx_menu'&&!String(x?.id||'').startsWith('brfx_'));t.structure.push({id:'brfx_menu',name:'BRFX',icon:'auto_awesome',children:Object.values(A)});t.update?.(true);}catch(e){console.error('BRFX menu',e);}};
-    menu();setTimeout(menu,300);applyAll();msg('BRFX 1.7.0 ready');
+    menu();setTimeout(menu,300);applyAll();msg('BRFX 1.7.1 ready');
     this.onunload=()=>{try{clearInterval(p._lightTimer);clearInterval(p._glowTimer);}catch(e){}clearLighting();removeSky();removeGlow();getScenes().forEach(s=>{try{s.fog=null;}catch(e){}});};
   }
 });

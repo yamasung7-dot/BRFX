@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Custom Light Settings Pass v0.9.2
+ * Custom Light Settings Fix Pass v0.9.3
  *
  * MIT License — see LICENSE
  */
@@ -10,7 +10,7 @@ Plugin.register('brfx', {
     author: 'Yama Sung',
     icon: 'auto_awesome',
     description: 'Custom light types, colors, intensity, and a fully customizable 3-color skybox.',
-    version: '0.9.2',
+    version: '0.9.3',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -43,7 +43,7 @@ Plugin.register('brfx', {
         plugin.refresh = function() {
             if (typeof Canvas.updateAllFaces === 'function') Canvas.updateAllFaces();
             if (typeof Preview !== 'undefined' && Preview.selected && Preview.selected.render) {
-                try { Preview.selected.render(); } catch (error) { /* viewport may be between renders */ }
+                try { Preview.selected.render(); } catch (error) {}
             }
         };
 
@@ -72,7 +72,7 @@ Plugin.register('brfx', {
 
         plugin.removeLightBillboard = function() {
             if (plugin.lightBillboard) {
-                try { plugin.lightBillboard.remove(); } catch (error) { /* already removed */ }
+                try { plugin.lightBillboard.remove(); } catch (error) {}
                 plugin.lightBillboard = null;
             }
         };
@@ -88,9 +88,7 @@ Plugin.register('brfx', {
             }
             if (typeof billboard.getWorldCenter === 'function') {
                 const position = billboard.getWorldCenter();
-                if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
-                    return position.clone();
-                }
+                if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) return position.clone();
             }
             return null;
         };
@@ -99,19 +97,16 @@ Plugin.register('brfx', {
             if (!billboard || !Array.isArray(billboard.size) || billboard.size.length < 2) return 1;
             const width = Math.abs(Number(billboard.size[0]) || 0);
             const height = Math.abs(Number(billboard.size[1]) || 0);
-            const average = (width + height) / 2;
-            return Math.max(0.1, average / plugin.baseBillboardSize);
+            return Math.max(0.1, ((width + height) / 2) / plugin.baseBillboardSize);
         };
 
         plugin.syncLightToBillboard = function() {
             if (!plugin.lightBillboard || !plugin.sceneLights.length) return;
             const light = plugin.sceneLights[0];
-            if (!light) return;
             const position = plugin.getBillboardPosition(plugin.lightBillboard);
-            if (!position) return;
-            const scale = plugin.getBillboardScale(plugin.lightBillboard);
+            if (!light || !position) return;
             light.position.copy(position);
-            light.distance = plugin.baseLightDistance * scale;
+            light.distance = plugin.baseLightDistance * plugin.getBillboardScale(plugin.lightBillboard);
             light.updateMatrixWorld(true);
             plugin.refresh();
         };
@@ -137,7 +132,7 @@ Plugin.register('brfx', {
             const billboard = new Billboard({
                 name: 'BRFX Light Source',
                 position: [vector.x, vector.y, vector.z],
-                size: [plugin.baseBillboardSize, plugin.baseBillboardSize],
+                size: [4, 4],
                 visibility: true,
                 export: false,
             }).init();
@@ -221,17 +216,14 @@ Plugin.register('brfx', {
                 return null;
             }
             plugin.removeSkyDome();
-
             const topColor = colors.top || plugin.customSettings.skyTop;
             const horizonColor = colors.horizon || plugin.customSettings.skyHorizon;
             const bottomColor = colors.bottom || plugin.customSettings.skyBottom;
-
             const geometry = new THREE.BoxGeometry(2, 2, 2);
             const vertexShader = `
                 varying vec3 vDirection;
                 void main() {
-                    vec3 direction = position;
-                    vDirection = normalize(direction);
+                    vDirection = normalize(position);
                     mat4 viewNoTranslation = viewMatrix;
                     viewNoTranslation[3][0] = 0.0;
                     viewNoTranslation[3][1] = 0.0;
@@ -249,11 +241,9 @@ Plugin.register('brfx', {
                     float h = clamp(vDirection.y * 0.5 + 0.5, 0.0, 1.0);
                     vec3 color;
                     if (h < 0.5) {
-                        float t = smoothstep(0.0, 0.5, h);
-                        color = mix(bottomColor, horizonColor, t);
+                        color = mix(bottomColor, horizonColor, smoothstep(0.0, 0.5, h));
                     } else {
-                        float t = smoothstep(0.5, 1.0, h);
-                        color = mix(horizonColor, topColor, t);
+                        color = mix(horizonColor, topColor, smoothstep(0.5, 1.0, h));
                     }
                     gl_FragColor = vec4(color, 1.0);
                 }
@@ -270,6 +260,7 @@ Plugin.register('brfx', {
                 depthWrite: false,
                 depthTest: false,
                 fog: false,
+                toneMapped: false,
             });
             const skybox = new THREE.Mesh(geometry, material);
             skybox.name = 'BRFX_Procedural_Sky_Dome';
@@ -296,8 +287,11 @@ Plugin.register('brfx', {
 
         plugin.applyCustomLight = function(settings, showMessage = true) {
             plugin.customSettings = Object.assign(plugin.customSettings, settings);
+            const lightType = plugin.customSettings.lightType === 'environment' ? 'environment' : 'default';
+            plugin.customSettings.lightType = lightType;
+            plugin.customSettings.lightColor = plugin.customSettings.lightColor || '#ffffff';
 
-            if (plugin.customSettings.lightType === 'environment') {
+            if (lightType === 'environment') {
                 const center = plugin.getModelCenter();
                 plugin.addPointLight({
                     color: plugin.customSettings.lightColor,
@@ -306,8 +300,8 @@ Plugin.register('brfx', {
                     position: center.clone().add(new THREE.Vector3(0, 8, 6)),
                 });
                 if (typeof Sun !== 'undefined' && Sun) {
-                    Sun.color.set(plugin.customSettings.lightColor);
-                    if (typeof Sun.intensity === 'number') Sun.intensity = 0.65;
+                    if (Sun.color) Sun.color.set('#ffffff');
+                    if (typeof Sun.intensity === 'number') Sun.intensity = 0;
                 }
             } else {
                 plugin.removeSceneLights();
@@ -333,13 +327,12 @@ Plugin.register('brfx', {
             } else {
                 plugin.removeSkyDome();
             }
-
             if (showMessage) Blockbench.showQuickMessage('BRFX: Custom Light settings applied', 2500);
         };
 
         plugin.openCustomLight = function() {
             if (plugin.customDialog) {
-                try { plugin.customDialog.hide(); } catch (error) { /* dialog may already be closed */ }
+                try { plugin.customDialog.hide(); } catch (error) {}
             }
             plugin.customDialog = new Dialog({
                 id: 'brfx_custom_light_dialog',
@@ -348,7 +341,6 @@ Plugin.register('brfx', {
                 form: {
                     lightType: {
                         label: 'Light Type',
-                        description: 'Choose between Blockbench-style default lighting and a real movable environment light.',
                         type: 'select',
                         options: {
                             default: 'Default Light (Sunlight)',
@@ -364,10 +356,7 @@ Plugin.register('brfx', {
                     lightSide: {
                         label: 'Light Direction',
                         type: 'select',
-                        options: {
-                            '0': 'Sun / Front',
-                            '1': 'Moon / Back',
-                        },
+                        options: { '0': 'Sun / Front', '1': 'Moon / Back' },
                         value: String(plugin.customSettings.lightSide),
                         condition: form => form.lightType === 'default',
                     },
@@ -422,137 +411,104 @@ Plugin.register('brfx', {
                         condition: form => form.skyEnabled,
                     },
                 },
-                onConfirm(result) {
+                onConfirm(form) {
                     plugin.applyCustomLight({
-                        lightType: result.lightType,
-                        lightColor: result.lightColor,
-                        lightSide: Number(result.lightSide) || 0,
-                        lightIntensity: Number(result.lightIntensity) || 0,
-                        environmentIntensity: Number(result.environmentIntensity) || 0,
-                        environmentDistance: Number(result.environmentDistance) || 40,
-                        skyEnabled: !!result.skyEnabled,
-                        skyTop: result.skyTop,
-                        skyHorizon: result.skyHorizon,
-                        skyBottom: result.skyBottom,
+                        lightType: form.lightType,
+                        lightColor: form.lightColor,
+                        lightSide: Number(form.lightSide) || 0,
+                        lightIntensity: Number(form.lightIntensity) || 0,
+                        environmentIntensity: Number(form.environmentIntensity) || 0,
+                        environmentDistance: Number(form.environmentDistance) || 1,
+                        skyEnabled: !!form.skyEnabled,
+                        skyTop: form.skyTop,
+                        skyHorizon: form.skyHorizon,
+                        skyBottom: form.skyBottom,
                     });
                 },
-            });
-            plugin.customDialog.show();
+            }).show();
         };
 
-        plugin.restoreLight = function(showMessage = true) {
+        plugin.addAction = function(id, name, icon, click) {
+            const action = new Action(id, { name, icon, click });
+            if (MenuBar && MenuBar.menus && MenuBar.menus.tools) MenuBar.menus.tools.addAction(action);
+            plugin.actionIds = plugin.actionIds || [];
+            plugin.actionIds.push(id);
+            return action;
+        };
+
+        plugin.addAction('brfx_warm_sun', 'BRFX — Warm Sun', 'wb_sunny', () => {
             plugin.removeSceneLights();
-            Canvas.global_light_color.copy(plugin.originalLightColor);
-            Canvas.global_light_side = plugin.originalLightSide;
-            if (typeof Sun !== 'undefined' && Sun) {
-                if (Sun.color) Sun.color.copy(Canvas.global_light_color);
-                if (plugin.originalSunIntensity !== null && typeof Sun.intensity === 'number') Sun.intensity = plugin.originalSunIntensity;
-            }
+            Canvas.global_light_color.set('#ffad52');
+            Canvas.global_light_side = 0;
+            if (typeof Sun !== 'undefined' && Sun) { Sun.color.set('#ffad52'); if (typeof Sun.intensity === 'number') Sun.intensity = 1.0; }
             plugin.refresh();
-            if (showMessage) Blockbench.showQuickMessage('BRFX: Blockbench lighting restored', 2500);
-        };
-
-        plugin.warmAction = new Action('brfx_warm_light', {
-            name: 'BRFX — Warm Sun', description: 'Strong golden ambient light for a warm, sunny look.', icon: 'wb_sunny',
-            click() { plugin.removeSceneLights(); Canvas.global_light_color.set('#ffad52'); Canvas.global_light_side = 0; plugin.refresh(); Blockbench.showQuickMessage('BRFX: Warm Sun lighting enabled', 2500); },
         });
-        plugin.neutralAction = new Action('brfx_neutral_light', {
-            name: 'BRFX — Neutral Daylight', description: 'Restore a clean neutral daylight tint.', icon: 'light_mode',
-            click() { plugin.removeSceneLights(); Canvas.global_light_color.set('#ffffff'); Canvas.global_light_side = 0; plugin.refresh(); Blockbench.showQuickMessage('BRFX: Neutral Daylight enabled', 2500); },
+        plugin.addAction('brfx_neutral_daylight', 'BRFX — Neutral Daylight', 'light_mode', () => {
+            plugin.removeSceneLights();
+            Canvas.global_light_color.set('#ffffff');
+            Canvas.global_light_side = 0;
+            if (typeof Sun !== 'undefined' && Sun) { Sun.color.set('#ffffff'); if (typeof Sun.intensity === 'number') Sun.intensity = 1.0; }
+            plugin.refresh();
         });
-        plugin.coolAction = new Action('brfx_cool_light', {
-            name: 'BRFX — Moonlight', description: 'Strong blue ambient light for a cool nighttime look.', icon: 'ac_unit',
-            click() { plugin.removeSceneLights(); Canvas.global_light_color.set('#6ea8ff'); Canvas.global_light_side = 1; plugin.refresh(); Blockbench.showQuickMessage('BRFX: Moonlight lighting enabled', 2500); },
+        plugin.addAction('brfx_moonlight', 'BRFX — Moonlight', 'nightlight', () => {
+            plugin.removeSceneLights();
+            Canvas.global_light_color.set('#6ea8ff');
+            Canvas.global_light_side = 1;
+            if (typeof Sun !== 'undefined' && Sun) { Sun.color.set('#6ea8ff'); if (typeof Sun.intensity === 'number') Sun.intensity = 0.8; }
+            plugin.refresh();
         });
-        plugin.cinematicAction = new Action('brfx_cinematic_light', {
-            name: 'BRFX — Cinematic Purple', description: 'A vivid purple-blue ambient tint for stylized scenes.', icon: 'movie',
-            click() { plugin.removeSceneLights(); Canvas.global_light_color.set('#a878ff'); Canvas.global_light_side = 1; plugin.refresh(); Blockbench.showQuickMessage('BRFX: Cinematic Purple lighting enabled', 2500); },
+        plugin.addAction('brfx_cinematic_purple', 'BRFX — Cinematic Purple', 'palette', () => {
+            plugin.removeSceneLights();
+            Canvas.global_light_color.set('#a878ff');
+            Canvas.global_light_side = 1;
+            if (typeof Sun !== 'undefined' && Sun) { Sun.color.set('#a878ff'); if (typeof Sun.intensity === 'number') Sun.intensity = 0.9; }
+            plugin.refresh();
         });
-        plugin.environmentAction = new Action('brfx_real_environment', {
-            name: 'BRFX — Real Environment Light', description: 'Create a real point light with a movable and resizable BRFX Light Source billboard.', icon: 'wb_sunny',
-            click() { plugin.addSoftEnvironment(); },
-        });
-        plugin.coolEnvironmentAction = new Action('brfx_real_cool_environment', {
-            name: 'BRFX — Real Cool Environment', description: 'Create a cool point light with a movable and resizable BRFX Light Source billboard.', icon: 'nightlight',
-            click() { plugin.addCoolEnvironment(); },
-        });
-        plugin.customLightAction = new Action('brfx_custom_light', {
-            name: 'BRFX-Costom Light',
-            description: 'Customize the light type, light color, intensity, and 3-color skybox gradient.',
-            icon: 'tune',
-            click() { plugin.openCustomLight(); },
-        });
-        plugin.skyAction = new Action('brfx_sky_dome', {
-            name: 'BRFX — Procedural Sky Dome',
-            description: 'Create a stable 3-color procedural skybox that follows camera rotation and is not limited by preview zoom distance.',
-            icon: 'cloud',
-            click() { plugin.createSkyDome(); Blockbench.showQuickMessage('BRFX: Stable 3-color Skybox enabled', 2500); },
-        });
-        plugin.restoreSkyAction = new Action('brfx_remove_sky_dome', {
-            name: 'BRFX — Remove Sky Dome',
-            description: 'Remove the BRFX procedural skybox.',
-            icon: 'hide_source',
-            click() { plugin.removeSkyDome(); Blockbench.showQuickMessage('BRFX: Skybox removed', 2500); },
-        });
-        plugin.restoreAction = new Action('brfx_restore_light', {
-            name: 'BRFX — Restore Lighting', description: 'Remove BRFX scene lights and their control billboard.', icon: 'restart_alt',
-            click() { plugin.restoreLight(); },
-        });
-
-        if (typeof MenuBar !== 'undefined' && MenuBar.menus && MenuBar.menus.tools) {
-            MenuBar.menus.tools.addAction(plugin.warmAction);
-            MenuBar.menus.tools.addAction(plugin.neutralAction);
-            MenuBar.menus.tools.addAction(plugin.coolAction);
-            MenuBar.menus.tools.addAction(plugin.cinematicAction);
-            MenuBar.menus.tools.addAction(plugin.environmentAction);
-            MenuBar.menus.tools.addAction(plugin.coolEnvironmentAction);
-            MenuBar.menus.tools.addAction(plugin.customLightAction);
-            MenuBar.menus.tools.addAction(plugin.skyAction);
-            MenuBar.menus.tools.addAction(plugin.restoreSkyAction);
-            MenuBar.menus.tools.addAction(plugin.restoreAction);
-        }
-
-        Canvas.global_light_color.set('#ffad52');
-        Canvas.global_light_side = 0;
-        plugin.refresh();
-    },
-
-    onunload() {
-        const plugin = this;
-        if (plugin.customDialog) {
-            try { plugin.customDialog.hide(); } catch (error) { /* already closed */ }
-            plugin.customDialog = null;
-        }
-        if (plugin.lightSyncTimer) clearInterval(plugin.lightSyncTimer);
-        plugin.lightSyncTimer = null;
-        if (plugin.removeSceneLights) plugin.removeSceneLights();
-        if (plugin.removeSkyDome) plugin.removeSkyDome();
-        if (plugin.originalLightColor && typeof Canvas !== 'undefined') {
+        plugin.addAction('brfx_environment_light', 'BRFX — Real Environment Light', 'lightbulb', () => plugin.addSoftEnvironment());
+        plugin.addAction('brfx_cool_environment', 'BRFX — Real Cool Environment', 'lightbulb_outline', () => plugin.addCoolEnvironment());
+        plugin.addAction('brfx_custom_light', 'BRFX-Costom Light', 'tune', () => plugin.openCustomLight());
+        plugin.addAction('brfx_sky_dome', 'BRFX — Procedural Sky Dome', 'cloud', () => plugin.createSkyDome());
+        plugin.addAction('brfx_remove_sky', 'BRFX — Remove Sky Dome', 'cloud_off', () => plugin.removeSkyDome());
+        plugin.addAction('brfx_restore_lighting', 'BRFX — Restore Lighting', 'restore', () => {
+            plugin.removeSceneLights();
             Canvas.global_light_color.copy(plugin.originalLightColor);
             Canvas.global_light_side = plugin.originalLightSide;
             if (typeof Sun !== 'undefined' && Sun) {
                 if (Sun.color) Sun.color.copy(plugin.originalLightColor);
                 if (plugin.originalSunIntensity !== null && typeof Sun.intensity === 'number') Sun.intensity = plugin.originalSunIntensity;
             }
-        }
-        [
-            plugin.warmAction,
-            plugin.neutralAction,
-            plugin.coolAction,
-            plugin.cinematicAction,
-            plugin.environmentAction,
-            plugin.coolEnvironmentAction,
-            plugin.customLightAction,
-            plugin.skyAction,
-            plugin.restoreSkyAction,
-            plugin.restoreAction,
-        ].forEach(action => {
-            if (action && typeof action.delete === 'function') action.delete();
+            plugin.refresh();
         });
-        if (plugin.refresh) plugin.refresh();
+
+        plugin.createSkyDome();
     },
 
-    oninstall() {
-        Blockbench.showQuickMessage('BRFX 0.9.2 installed — Custom Light is ready', 3000);
+    onunload() {
+        if (this.customDialog) { try { this.customDialog.hide(); } catch (error) {} }
+        if (this.lightSyncTimer) clearInterval(this.lightSyncTimer);
+        this.lightSyncTimer = null;
+        this.removeLightBillboard();
+        if (this.skyDome) {
+            const sky = this.skyDome;
+            if (sky.parent) sky.parent.remove(sky);
+            if (sky.geometry && typeof sky.geometry.dispose === 'function') sky.geometry.dispose();
+            if (sky.material && typeof sky.material.dispose === 'function') sky.material.dispose();
+            this.skyDome = null;
+        }
+        if (this.sceneLights) {
+            this.sceneLights.forEach(light => {
+                if (light && light.parent) light.parent.remove(light);
+                if (light && light.target && light.target.parent) light.target.parent.remove(light.target);
+            });
+            this.sceneLights.length = 0;
+        }
+        Canvas.global_light_color.copy(this.originalLightColor);
+        Canvas.global_light_side = this.originalLightSide;
+        if (typeof Sun !== 'undefined' && Sun) {
+            if (Sun.color) Sun.color.copy(this.originalLightColor);
+            if (this.originalSunIntensity !== null && typeof Sun.intensity === 'number') Sun.intensity = this.originalSunIntensity;
+        }
+        if (this.actionIds) this.actionIds.forEach(id => { try { BarItems[id]?.delete(); } catch (error) {} });
+        if (typeof Canvas.updateAllFaces === 'function') Canvas.updateAllFaces();
     },
 });

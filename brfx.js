@@ -1,6 +1,6 @@
 /*
  * BRFX — Blockbench Render FX
- * Scene Lighting Pass v0.6.1
+ * Scene Lighting Pass v0.7.0
  *
  * MIT License — see LICENSE
  */
@@ -9,8 +9,8 @@ Plugin.register('brfx', {
     title: 'BRFX — Scene Lighting',
     author: 'Yama Sung',
     icon: 'auto_awesome',
-    description: 'Scene-aware lighting with a movable Blockbench light-source control.',
-    version: '0.6.1',
+    description: 'Scene-aware lighting with a movable and scalable Blockbench light-source control.',
+    version: '0.7.0',
     variant: 'both',
     min_version: '4.10.0',
     tags: ['Rendering', 'Tools'],
@@ -23,6 +23,7 @@ Plugin.register('brfx', {
         plugin.originalLightColor = Canvas.global_light_color.clone();
         plugin.originalLightSide = Canvas.global_light_side;
         plugin.originalSunIntensity = (typeof Sun !== 'undefined' && Sun) ? Sun.intensity : null;
+        plugin.baseLightDistance = 40;
 
         plugin.refresh = function() {
             if (typeof Canvas.updateAllFaces === 'function') Canvas.updateAllFaces();
@@ -85,6 +86,23 @@ Plugin.register('brfx', {
             return null;
         };
 
+        plugin.getLocatorScale = function(locator) {
+            if (!locator) return 1;
+
+            // Blockbench's scale tool changes the locator's native scale. Use the
+            // average absolute axis scale so X/Y/Z scaling all affect the light's
+            // effective radius. Non-uniform scaling remains predictable.
+            if (Array.isArray(locator.scale) && locator.scale.length >= 3) {
+                const x = Math.abs(Number(locator.scale[0]) || 0);
+                const y = Math.abs(Number(locator.scale[1]) || 0);
+                const z = Math.abs(Number(locator.scale[2]) || 0);
+                const average = (x + y + z) / 3;
+                return Math.max(0.1, average || 1);
+            }
+
+            return 1;
+        };
+
         plugin.syncLightToLocator = function() {
             if (!plugin.lightLocator || !plugin.sceneLights.length) return;
             const light = plugin.sceneLights[0];
@@ -93,7 +111,14 @@ Plugin.register('brfx', {
             const position = plugin.getLocatorPosition(plugin.lightLocator);
             if (!position) return;
 
+            const scale = plugin.getLocatorScale(plugin.lightLocator);
             light.position.copy(position);
+
+            // A Three.js PointLight has no visual radius property. Map the
+            // Blockbench locator scale to its illumination distance instead, so
+            // scaling the BRFX Light Source genuinely makes its influence smaller
+            // or larger while preserving the existing light intensity.
+            light.distance = plugin.baseLightDistance * scale;
             light.updateMatrixWorld(true);
             plugin.refresh();
         };
@@ -105,7 +130,7 @@ Plugin.register('brfx', {
             }, 50);
         };
 
-        plugin.createLightLocator = function(position) {
+        plugin.createLightLocator = function(position, distance) {
             plugin.removeLightLocator();
             if (typeof Locator === 'undefined') {
                 Blockbench.showQuickMessage('BRFX: Blockbench locators are unavailable', 3000);
@@ -113,6 +138,8 @@ Plugin.register('brfx', {
             }
 
             const vector = position || plugin.getModelCenter().clone().add(new THREE.Vector3(0, 8, 6));
+            plugin.baseLightDistance = Number.isFinite(distance) ? distance : 40;
+
             const locator = new Locator({
                 name: 'BRFX Light Source',
                 from: [vector.x, vector.y, vector.z],
@@ -126,6 +153,8 @@ Plugin.register('brfx', {
         };
 
         plugin.removeSceneLights = function() {
+            if (plugin.lightSyncTimer) clearInterval(plugin.lightSyncTimer);
+            plugin.lightSyncTimer = null;
             plugin.sceneLights.forEach(light => {
                 if (light && light.parent) light.parent.remove(light);
                 if (light && light.target && light.target.parent) light.target.parent.remove(light.target);
@@ -146,6 +175,7 @@ Plugin.register('brfx', {
             const color = new THREE.Color(options.color || '#ffe0b2');
             const intensity = Number.isFinite(options.intensity) ? options.intensity : 3.0;
             const distance = Number.isFinite(options.distance) ? options.distance : 32;
+            plugin.baseLightDistance = distance;
             const light = new THREE.PointLight(color, intensity, distance, 2);
             light.name = 'BRFX_Environment_Point_Light';
             light.castShadow = false;
@@ -153,7 +183,7 @@ Plugin.register('brfx', {
             light.position.copy(position);
             targetScene.add(light);
             plugin.sceneLights.push(light);
-            plugin.createLightLocator(position);
+            plugin.createLightLocator(position, distance);
             plugin.refresh();
             return light;
         };
@@ -170,7 +200,7 @@ Plugin.register('brfx', {
                 Sun.color.set('#fff1df');
                 if (typeof Sun.intensity === 'number') Sun.intensity = 0.65;
             }
-            Blockbench.showQuickMessage('BRFX: Light Source created — move the locator to position it', 3500);
+            Blockbench.showQuickMessage('BRFX: Light Source created — move or scale the locator to control it', 3500);
         };
 
         plugin.addCoolEnvironment = function() {
@@ -185,7 +215,7 @@ Plugin.register('brfx', {
                 Sun.color.set('#dbe9ff');
                 if (typeof Sun.intensity === 'number') Sun.intensity = 0.45;
             }
-            Blockbench.showQuickMessage('BRFX: Cool Light Source created — move the locator to position it', 3500);
+            Blockbench.showQuickMessage('BRFX: Cool Light Source created — move or scale the locator to control it', 3500);
         };
 
         plugin.restoreLight = function(showMessage = true) {
@@ -256,14 +286,14 @@ Plugin.register('brfx', {
 
         plugin.environmentAction = new Action('brfx_real_environment', {
             name: 'BRFX — Real Environment Light',
-            description: 'Create a real point light and a movable BRFX Light Source locator.',
+            description: 'Create a real point light with a movable and scalable BRFX Light Source locator.',
             icon: 'wb_sunny',
             click() { plugin.addSoftEnvironment(); },
         });
 
         plugin.coolEnvironmentAction = new Action('brfx_real_cool_environment', {
             name: 'BRFX — Real Cool Environment',
-            description: 'Create a cool point light with a movable BRFX Light Source locator.',
+            description: 'Create a cool point light with a movable and scalable BRFX Light Source locator.',
             icon: 'nightlight',
             click() { plugin.addCoolEnvironment(); },
         });
@@ -314,6 +344,7 @@ Plugin.register('brfx', {
         this.getScene = null;
         this.getModelCenter = null;
         this.getLocatorPosition = null;
+        this.getLocatorScale = null;
         this.removeLightLocator = null;
         this.syncLightToLocator = null;
         this.startLightSync = null;
@@ -325,5 +356,6 @@ Plugin.register('brfx', {
         this.restoreLight = null;
         this.originalLightColor = null;
         this.originalSunIntensity = null;
+        this.baseLightDistance = null;
     },
 });

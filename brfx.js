@@ -1,38 +1,141 @@
-/*
+/* 
  * BRFX — Blockbench Render FX
- * Master Toggle + Mobile Optimization Pass v1.2.0
+ * Proper Silhouette Outlines Pass v1.3.0
  * MIT License — see LICENSE
  */
-Plugin.register('brfx',{title:'BRFX — Render FX',author:'Yama Sung',icon:'auto_awesome',version:'1.2.0',variant:'both',min_version:'4.10.0',tags:['Rendering','Tools'],onload(){
- const plugin=this,isBRFX=id=>typeof id==='string'&&id.indexOf('brfx_')===0;
- plugin.brfxEnabled=true;plugin.mobileOptimization=false;plugin._mobilePreviousSettings=null;plugin._mobilePreviousPixelRatios=new Map();plugin._mobileResizeHandler=null;
- const cleanMenu=a=>{if(!Array.isArray(a))return;for(let i=a.length-1;i>=0;i--){const x=a[i];if((typeof x==='string'&&isBRFX(x))||(x&&isBRFX(x.id))){a.splice(i,1);try{x&&x.delete&&x.delete()}catch(e){};continue}if(x&&Array.isArray(x.children))cleanMenu(x.children)}};
- const cleanGlobals=()=>{try{if(typeof MenuBar!=='undefined'&&MenuBar.menus)Object.values(MenuBar.menus).forEach(m=>{try{if(m&&Array.isArray(m.structure))cleanMenu(m.structure)}catch(e){}})}catch(e){}try{if(typeof BarItems!=='undefined')Object.keys(BarItems).forEach(id=>{if(isBRFX(id))try{BarItems[id]&&BarItems[id].delete&&BarItems[id].delete()}catch(e){}})}catch(e){}};cleanGlobals();
- const enhance=d=>{if(!d||d._brfxSections)return false;const groups=[['Lighting',['lightType','lightColor','lightSide','lightIntensity','environmentIntensity','environmentDistance','indirect','quality']],['Skybox',['skyEnabled','skyMode','skyImageUrl','skyRotation','skyTop','skyTopWeight','skyHorizon','skyHorizonWeight','skyBottom','skyBottomWeight']],['Atmosphere',['fogEnabled','fogColor','fogNear','fogFar']],['Rendering',['exposure','contrast']]];let made=0;groups.forEach(([title,ids])=>{const bars=ids.map(id=>{try{const b=d.getFormBar(id);return b&&b.length?b[0]:null}catch(e){return null}}).filter(Boolean);if(!bars.length)return;const h=document.createElement('button');h.type='button';h.className='brfx-section-header';h.textContent='▾ '+title;h.style.cssText='display:block;width:100%;text-align:left;margin:8px 0 4px;padding:8px 10px;border:0;border-radius:4px;background:var(--color-back);color:var(--color-text);font-weight:600;cursor:pointer;';bars[0].parentNode.insertBefore(h,bars[0]);let c=false;h.addEventListener('click',()=>{c=!c;h.textContent=(c?'▸ ':'▾ ')+title;bars.forEach(b=>b.classList.toggle('brfx-section-hidden',c))});made++});if(made){d._brfxSections=true;let s=document.getElementById('brfx-section-style');if(!s){s=document.createElement('style');s.id='brfx-section-style';s.textContent='.brfx-section-hidden{display:none!important}.brfx-section-header:focus{outline:1px solid var(--color-accent)}';document.head.appendChild(s)}}return made>0};
- const presets={clear_day:{name:'Clear Day',skyTop:'#4f82c4',skyHorizon:'#ffd6a0',skyBottom:'#6f5748',skyTopWeight:70,skyHorizonWeight:20,skyBottomWeight:10,fogColor:'#b8c6d6'},warm_sunset:{name:'Warm Sunset',skyTop:'#5b3f8c',skyHorizon:'#ff9a5b',skyBottom:'#3b253f',skyTopWeight:55,skyHorizonWeight:30,skyBottomWeight:15,fogColor:'#d9a58f'},overcast:{name:'Overcast',skyTop:'#737f8d',skyHorizon:'#b9c1c8',skyBottom:'#59636e',skyTopWeight:45,skyHorizonWeight:40,skyBottomWeight:15,fogColor:'#aeb7bf'},twilight:{name:'Twilight',skyTop:'#3f4f8c',skyHorizon:'#d37b8a',skyBottom:'#2b2340',skyTopWeight:60,skyHorizonWeight:25,skyBottomWeight:15,fogColor:'#716b8a'},night:{name:'Night',skyTop:'#0b1633',skyHorizon:'#30466f',skyBottom:'#111827',skyTopWeight:75,skyHorizonWeight:15,skyBottomWeight:10,fogColor:'#18223a'}};
- const captureRenderState=core=>{if(core._brfxRenderState)return;core._brfxRenderState=[];try{if(typeof Preview!=='undefined'&&Array.isArray(Preview.all))Preview.all.forEach(p=>{if(!p||!p.renderer)return;core._brfxRenderState.push({p,exposure:p.renderer.toneMappingExposure,filter:p.canvas&&p.canvas.style?p.canvas.style.filter:''})})}catch(e){}};
- const applyRenderState=core=>{captureRenderState(core);const exposure=Math.max(.1,Math.min(4,Number(core.settings.exposure)||1));const contrast=Math.max(.5,Math.min(1.5,Number(core.settings.contrast)||1));try{if(typeof Preview!=='undefined'&&Array.isArray(Preview.all))Preview.all.forEach(p=>{if(!p||!p.renderer)return;if(typeof p.renderer.toneMappingExposure==='number')p.renderer.toneMappingExposure=exposure;if(p.canvas&&p.canvas.style)p.canvas.style.filter='contrast('+contrast+')'})}catch(e){}};
- const restoreRenderState=core=>{try{if(Array.isArray(core._brfxRenderState))core._brfxRenderState.forEach(s=>{if(!s||!s.p)return;if(s.p.renderer&&typeof s.exposure==='number')s.p.renderer.toneMappingExposure=s.exposure;if(s.p.canvas&&s.p.canvas.style)s.p.canvas.style.filter=s.filter||''})}catch(e){}core._brfxRenderState=null};
- const applyEnvironmentRotation=core=>{if(!plugin.brfxEnabled)return;const deg=Number(core.settings.skyRotation)||0,rad=typeof THREE!=='undefined'?THREE.MathUtils.degToRad(deg):deg*Math.PI/180;try{if(core.skyDome)core.skyDome.rotation.y=rad}catch(e){}try{if(core.sceneLights&&core.sceneLights.length){const c=core.getModelCenter(),v=new THREE.Vector3(0,8,6);v.applyAxisAngle(new THREE.Vector3(0,1,0),rad);core.sceneLights[0].position.copy(c).add(v);if(core.lightBillboard&&Array.isArray(core.lightBillboard.position))core.lightBillboard.position=[core.sceneLights[0].position.x,core.sceneLights[0].position.y,core.sceneLights[0].position.z];core.syncLightToBillboard&&core.syncLightToBillboard()}}catch(e){}};
- const applyEnhancements=core=>{if(!plugin.brfxEnabled)return;try{core.applyAtmosphere&&core.applyAtmosphere()}catch(e){}applyEnvironmentRotation(core);applyRenderState(core);try{core.refresh&&core.refresh()}catch(e){}};
- const removeFog=core=>{let removed=0;const roots=[];try{if(typeof core.getScene==='function')roots.push(core.getScene())}catch(e){}try{if(typeof scene!=='undefined')roots.push(scene)}catch(e){}try{if(typeof window!=='undefined'&&window.scene)roots.push(window.scene)}catch(e){}try{if(typeof Preview!=='undefined'&&Array.isArray(Preview.all))Preview.all.forEach(p=>{if(p&&p.scene)roots.push(p.scene)})}catch(e){}const seen=[];roots.forEach(s=>{if(!s||seen.indexOf(s)>=0)return;seen.push(s);try{if(s.fog){s.fog=null;removed++}}catch(e){}});try{if(core.settings)core.settings.fogEnabled=false}catch(e){}try{if(typeof Canvas!=='undefined'&&typeof Canvas.updateAllFaces==='function')Canvas.updateAllFaces()}catch(e){}try{if(typeof Preview!=='undefined'&&Array.isArray(Preview.all))Preview.all.forEach(p=>{try{p&&p.render&&p.render()}catch(e){}})}catch(e){}try{Blockbench.showQuickMessage(removed?'BRFX: Fog / haze removed':'BRFX: Fog / haze is already off',2200)}catch(e){}};
- const robustRestore=core=>{try{if(core.lightSyncTimer)clearInterval(core.lightSyncTimer);core.lightSyncTimer=null}catch(e){}try{if(core.sceneLights)core.sceneLights.forEach(l=>{try{if(l&&l.parent)l.parent.remove(l)}catch(e){}});core.sceneLights=[]}catch(e){}try{if(core.ambientLight&&core.ambientLight.parent)core.ambientLight.parent.remove(core.ambientLight);core.ambientLight=null}catch(e){}try{if(core.lightBillboard)core.lightBillboard.remove();core.lightBillboard=null}catch(e){}try{if(typeof Outliner!=='undefined'&&Array.isArray(Outliner.elements))Outliner.elements.slice().forEach(el=>{if(el&&typeof el.name==='string'&&el.name.indexOf('BRFX Light Source')===0)try{el.remove()}catch(e){}})}catch(e){}const roots=[];try{if(typeof core.getScene==='function')roots.push(core.getScene())}catch(e){}try{if(typeof scene!=='undefined')roots.push(scene)}catch(e){}try{if(typeof window!=='undefined'&&window.scene)roots.push(window.scene)}catch(e){}try{if(typeof Preview!=='undefined'&&Preview.all)Preview.all.forEach(p=>{if(p&&p.scene)roots.push(p.scene)})}catch(e){}const seen=[];roots.forEach(s=>{if(!s||seen.indexOf(s)>=0)return;seen.push(s);const walk=o=>{if(!o)return;try{if(typeof o.name==='string'&&o.name.indexOf('BRFX_')===0){if(o.parent)o.parent.remove(o);return}}catch(e){}try{if(o.children&&o.children.length)o.children.slice().forEach(walk)}catch(e){}};try{if(s.children)s.children.slice().forEach(walk)}catch(e){}try{s.fog=core.originalSceneFog||null}catch(e){}});restoreRenderState(core);core.skyDome=null;core.skyTexture=null;try{if(typeof Canvas!=='undefined'&&Canvas&&core.originalLightColor){Canvas.global_light_color.copy(core.originalLightColor);Canvas.global_light_side=core.originalLightSide}}catch(e){}try{if(typeof Sun!=='undefined'&&Sun){if(core.originalLightColor)Sun.color.copy(core.originalLightColor);if(core.originalSunIntensity!==null&&core.originalSunIntensity!==undefined)Sun.intensity=core.originalSunIntensity}}catch(e){}try{if(core.customDialog)core.customDialog.hide()}catch(e){}try{if(core.atmosphereDialog)core.atmosphereDialog.hide()}catch(e){}try{if(typeof Canvas!=='undefined'&&typeof Canvas.updateAllFaces==='function')Canvas.updateAllFaces()}catch(e){}try{if(typeof Preview!=='undefined'&&Preview.all)Preview.all.forEach(p=>{try{p&&p.render&&p.render()}catch(e){}})}catch(e){} };
- const mobileKeys=['background_rendering','shading','fps_limit','motion_trails','highlight_cubes','grids','base_grid','large_grid','full_grid','large_box','ground_plane','flipbook_textures_in_animation','brush_cursor_3d','outlines_in_paint_mode','pixel_grid','painting_grid'];
- const readSetting=k=>{try{return typeof settings!=='undefined'&&settings[k]?settings[k].value:undefined}catch(e){return undefined}};
- const writeSetting=(k,v)=>{try{if(typeof settings!=='undefined'&&settings[k]){settings[k].value=v;return true}}catch(e){}return false};
- const getMobileCanvases=()=>typeof document==='undefined'?[]:Array.from(document.querySelectorAll('.preview canvas'));
- const applyMobilePixelRatio=()=>{if(typeof Blockbench==='undefined'||!Blockbench.isMobile)return;for(const canvas of getMobileCanvases()){const preview=canvas.preview,renderer=preview&&preview.renderer;if(!renderer||typeof renderer.setPixelRatio!=='function')continue;if(!plugin._mobilePreviousPixelRatios.has(renderer)){const current=typeof renderer.getPixelRatio==='function'?renderer.getPixelRatio():window.devicePixelRatio||1;plugin._mobilePreviousPixelRatios.set(renderer,current)}const target=Math.min(window.devicePixelRatio||1,1.5);if(typeof renderer.getPixelRatio!=='function'||renderer.getPixelRatio()!==target){renderer.setPixelRatio(target);if(preview.width&&preview.height&&typeof renderer.setSize==='function')renderer.setSize(preview.width,preview.height,false)}}};
- const restoreMobilePixelRatio=()=>{for(const [renderer,ratio] of plugin._mobilePreviousPixelRatios){try{if(renderer&&typeof renderer.setPixelRatio==='function'){renderer.setPixelRatio(ratio);const canvas=renderer.domElement,preview=canvas&&canvas.preview;if(preview&&preview.width&&preview.height&&typeof renderer.setSize==='function')renderer.setSize(preview.width,preview.height,false)}}catch(e){}}plugin._mobilePreviousPixelRatios.clear()};
- const enableMobile=()=>{if(plugin.mobileOptimization)return;plugin._mobilePreviousSettings={};mobileKeys.forEach(k=>{const v=readSetting(k);if(v!==undefined)plugin._mobilePreviousSettings[k]=v});writeSetting('background_rendering',false);writeSetting('shading',false);writeSetting('fps_limit',30);writeSetting('motion_trails',false);writeSetting('highlight_cubes',false);writeSetting('grids',false);writeSetting('base_grid',false);writeSetting('large_grid',false);writeSetting('full_grid',false);writeSetting('large_box',false);writeSetting('ground_plane',false);writeSetting('flipbook_textures_in_animation',false);writeSetting('brush_cursor_3d',false);writeSetting('outlines_in_paint_mode',false);writeSetting('pixel_grid',false);writeSetting('painting_grid',false);plugin.mobileOptimization=true;if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){plugin._mobileResizeHandler=()=>{if(!plugin.mobileOptimization)return;typeof requestAnimationFrame==='function'?requestAnimationFrame(applyMobilePixelRatio):applyMobilePixelRatio()};window.addEventListener('resize',plugin._mobileResizeHandler,{passive:true})}applyMobilePixelRatio()};
- const disableMobile=()=>{if(!plugin.mobileOptimization)return;if(plugin._mobileResizeHandler&&typeof window!=='undefined'){window.removeEventListener('resize',plugin._mobileResizeHandler);plugin._mobileResizeHandler=null}restoreMobilePixelRatio();if(plugin._mobilePreviousSettings)Object.entries(plugin._mobilePreviousSettings).forEach(([k,v])=>writeSetting(k,v));plugin._mobilePreviousSettings=null;plugin.mobileOptimization=false};
- const setBRFXEnabled=core=>{plugin.brfxEnabled?null:robustRestore(core);try{if(typeof Preview!=='undefined'&&Preview.all)Preview.all.forEach(p=>{try{p&&p.render&&p.render()}catch(e){}})}catch(e){}};
- const openBRFXControl=core=>{try{if(plugin.brfxDialog){plugin.brfxDialog.show();return}plugin.brfxDialog=new Dialog({id:'brfx_master_control',title:'BRFX — On / Off',form:{brfxEnabled:{label:'BRFX Enabled',type:'checkbox',value:plugin.brfxEnabled},mobileOptimization:{label:'Mobile Optimization',type:'checkbox',value:plugin.mobileOptimization}},onConfirm(form){const next=!!form.brfxEnabled,mob=!!form.mobileOptimization;if(next&&!plugin.brfxEnabled){plugin.brfxEnabled=true;Blockbench.showQuickMessage('BRFX enabled',1200)}else if(!next&&plugin.brfxEnabled){plugin.brfxEnabled=false;robustRestore(core);Blockbench.showQuickMessage('BRFX disabled — effects stopped',1800)}if(mob&&!plugin.mobileOptimization)enableMobile();else if(!mob&&plugin.mobileOptimization)disableMobile()}});plugin.brfxDialog.show()}catch(e){console.error(e);try{Blockbench.showQuickMessage('BRFX: control panel failed',2500)}catch(x){}}};
- const addAction=(core,id,name,icon,click)=>{try{const action=new Action(id,{name,icon,click});if(typeof MenuBar!=='undefined'&&MenuBar.menus&&MenuBar.menus.tools)MenuBar.menus.tools.addAction(action);core._actions=core._actions||[];core._actions.push(action)}catch(e){}};
- const addAtmosphereAction=core=>addAction(core,'brfx_atmosphere_settings','BRFX — Atmosphere Settings','cloud',()=>openAtmosphere(core));
- const addRemoveFogAction=core=>addAction(core,'brfx_remove_fog','BRFX — Remove Fog','visibility_off',()=>removeFog(core));
- const addMasterAction=core=>addAction(core,'brfx_master_control','BRFX — On / Off','power_settings_new',()=>openBRFXControl(core));
- const openAtmosphere=core=>{try{if(!plugin.brfxEnabled){Blockbench.showQuickMessage('BRFX is off — turn it on first',1800);return}if(core.atmosphereDialog){core.atmosphereDialog.show();return}const s=core.settings,p=Object.keys(presets).reduce((o,k)=>(o[k]=presets[k].name,o),{});p.custom='Custom';core.atmosphereDialog=new Dialog({id:'brfx_atmosphere_settings',title:'BRFX — Atmosphere Settings',form:{skyPreset:{label:'Sky Preset',type:'select',options:p,value:'custom'},skyRotation:{label:'Environment Rotation (°)',type:'number',value:Number(s.skyRotation)||0,min:-180,max:180,step:1},fogEnabled:{label:'Enable Fog / Haze',type:'checkbox',value:!!s.fogEnabled},fogColor:{label:'Fog Color',type:'color',value:s.fogColor},fogNear:{label:'Fog Near',type:'number',value:Number(s.fogNear)||20,min:0,max:1000,step:1},fogFar:{label:'Fog Far',type:'number',value:Number(s.fogFar)||180,min:1,max:2000,step:1},exposure:{label:'Exposure',type:'number',value:Number(s.exposure)||1,min:.1,max:4,step:.05},contrast:{label:'Contrast',type:'number',value:Number(s.contrast)||1,min:.5,max:1.5,step:.05}},onConfirm(form){const preset=form.skyPreset&&presets[form.skyPreset];if(preset){Object.assign(s,preset);s.skyMode='procedural';s.skyEnabled=true}Object.assign(s,{skyRotation:Number(form.skyRotation)||0,fogEnabled:!!form.fogEnabled,fogColor:core.normalizeColor(form.fogColor,s.fogColor),fogNear:Number(form.fogNear)||20,fogFar:Number(form.fogFar)||180,exposure:Number(form.exposure)||1,contrast:Number(form.contrast)||1});if(plugin.brfxEnabled){core.applyAll(true);applyEnhancements(core)}}});core.atmosphereDialog.show()}catch(e){console.error(e);try{Blockbench.showQuickMessage('BRFX: Atmosphere settings failed',3000)}catch(x){}}};
- const run=src=>{try{const patched=src.replace(/\s*plugin\.applyAll\(false\);\s*\n\s*\},\n\n\s*onunload/,'\n    },\n\n    onunload');const m=patched.match(/Plugin\.register\(['"]brfx['"]\s*,\s*(\{[\s\S]*\})\s*\);?\s*$/);if(!m)throw Error('BRFX core parse failed');const core=new Function('return '+m[1])();if(core.onload)core.onload.call(core);const originalUnload=core.onunload;core.onunload=function(fromRestore=false){if(fromRestore){robustRestore(core);return}restoreRenderState(core);disableMobile();if(typeof originalUnload==='function')return originalUnload.call(core,false)};plugin._core=core;robustRestore(core);const originalApply=core.applyAll;if(typeof originalApply==='function')core.applyAll=function(showMessage=true){if(!plugin.brfxEnabled)return null;const r=originalApply.call(core,showMessage);applyEnhancements(core);return r};addMasterAction(core);addAtmosphereAction(core);addRemoveFogAction(core);const original=core.openSettings||core.openCustomLight;if(typeof original==='function'){const wrapped=function(){if(!plugin.brfxEnabled){Blockbench.showQuickMessage('BRFX is off — turn it on first',1800);return}const r=original.apply(core,arguments);let tries=0;const wait=()=>{const d=core.customDialog||((typeof Dialog!=='undefined')?Dialog.open:null);if(enhance(d)||tries++>12)return;setTimeout(wait,80)};setTimeout(wait,0);return r};core.openSettings=wrapped;core.openCustomLight=wrapped}}catch(e){console.error('BRFX core load failed',e);try{Blockbench.showQuickMessage('BRFX: core load failed',3000)}catch(x){}}};
- const url='https://raw.githubusercontent.com/yamasung7-dot/BRFX/375041201b708725be9fbaa6e6059bca196ddf2b/brfx.js';
- if(typeof fetch==='function')fetch(url,{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.text()}).then(run).catch(e=>{console.error(e);try{Blockbench.showQuickMessage('BRFX: could not reload core',3000)}catch(x){}});else if(typeof $!=='undefined'&&typeof $.ajax==='function')$.ajax({url:url+'?v=1.2.0',cache:false,success:run,error:()=>{try{Blockbench.showQuickMessage('BRFX: could not reload core',3000)}catch(e){}}});
-},onunload(){try{this._core&&this._core.onunload&&this._core.onunload.call(this._core,false)}catch(e){}}});
+Plugin.register('brfx',{title:'BRFX — Render FX',author:'Yama Sung',icon:'auto_awesome',version:'1.3.0',variant:'both',min_version:'4.10.0',tags:['Rendering','Tools'],onload(){
+ const plugin=this;
+ plugin.outlineEnabled=false;
+ plugin.outlineColor='#17131b';
+ plugin.outlineThickness=0.08;
+ plugin.outlineGroup=null;
+ plugin.outlineSyncTimer=null;
+ plugin.outlineMaterials=[];
+ const cleanActions=()=>{try{if(typeof BarItems!=='undefined')Object.keys(BarItems).forEach(id=>{if(typeof id==='string'&&id.indexOf('brfx_outline_')===0)try{BarItems[id]&&BarItems[id].delete&&BarItems[id].delete()}catch(e){}})}catch(e){}};
+ cleanActions();
+ const removeOutlines=()=>{
+   try{if(plugin.outlineSyncTimer)clearInterval(plugin.outlineSyncTimer)}catch(e){}
+   plugin.outlineSyncTimer=null;
+   try{if(plugin.outlineGroup&&plugin.outlineGroup.parent)plugin.outlineGroup.parent.remove(plugin.outlineGroup)}catch(e){}
+   plugin.outlineGroup=null;
+   plugin.outlineMaterials.forEach(m=>{try{m.dispose&&m.dispose()}catch(e){}});
+   plugin.outlineMaterials=[];
+ };
+ const getScene=()=>{try{if(typeof scene!=='undefined'&&scene)return scene}catch(e){}try{if(typeof window!=='undefined'&&window.scene)return window.scene}catch(e){}return null};
+ const isModelMesh=o=>{
+   if(!o||!o.isMesh||!o.geometry)return false;
+   if(o.name&&String(o.name).indexOf('BRFX_')===0)return false;
+   if(o.isGridHelper||o.isAxesHelper||o.isLine||o.isLineSegments)return false;
+   if(o.type==='GridHelper'||o.type==='AxesHelper')return false;
+   return true;
+ };
+ const makeMaterial=()=>{
+   const material=new THREE.MeshBasicMaterial({color:plugin.outlineColor,side:THREE.BackSide,depthWrite:false,depthTest:true,transparent:false});
+   material.onBeforeCompile=shader=>{
+     shader.uniforms.brfxOutlineThickness={value:Number(plugin.outlineThickness)||0.08};
+     shader.vertexShader='uniform float brfxOutlineThickness;\n'+shader.vertexShader;
+     shader.vertexShader=shader.vertexShader.replace('#include <project_vertex>','transformed += objectNormal * brfxOutlineThickness;\n#include <project_vertex>');
+     material.userData.brfxShader=shader;
+   };
+   material.needsUpdate=true;
+   plugin.outlineMaterials.push(material);
+   return material;
+ };
+ const buildOutlines=()=>{
+   removeOutlines();
+   if(!plugin.outlineEnabled)return;
+   const s=getScene();
+   if(!s||typeof THREE==='undefined')return;
+   plugin.outlineGroup=new THREE.Group();
+   plugin.outlineGroup.name='BRFX_Silhouette_Outlines';
+   plugin.outlineGroup.renderOrder=-10;
+   const sources=[];
+   try{s.traverse(o=>{if(isModelMesh(o))sources.push(o)})}catch(e){}
+   sources.forEach((source,i)=>{
+     try{
+       const material=makeMaterial();
+       const outline=new THREE.Mesh(source.geometry,material);
+       outline.name='BRFX_Outline_'+i;
+       outline.frustumCulled=false;
+       outline.matrixAutoUpdate=false;
+       outline.renderOrder=-10;
+       outline.userData.brfxSource=source;
+       outline.matrix.copy(source.matrixWorld);
+       outline.visible=source.visible!==false;
+       plugin.outlineGroup.add(outline);
+     }catch(e){console.warn('BRFX outline mesh failed',e)}
+   });
+   if(plugin.outlineGroup.children.length)s.add(plugin.outlineGroup);
+   plugin.outlineSyncTimer=setInterval(()=>{
+     if(!plugin.outlineEnabled||plugin._core&&plugin._core.brfxEnabled===false){if(plugin.outlineGroup)removeOutlines();return}
+     if(!plugin.outlineGroup)return;
+     plugin.outlineGroup.children.forEach(o=>{
+       const src=o.userData&&o.userData.brfxSource;
+       if(!src)return;
+       try{src.updateMatrixWorld(true);o.matrix.copy(src.matrixWorld);o.visible=src.visible!==false}catch(e){}
+     });
+   },50);
+ };
+ const updateOutlines=()=>{
+   if(plugin._core&&plugin._core.brfxEnabled===false){removeOutlines();return}
+   if(plugin.outlineEnabled)buildOutlines();else removeOutlines();
+ };
+ const openOutlineSettings=()=>{
+   try{
+     if(plugin.outlineDialog){plugin.outlineDialog.show();return}
+     plugin.outlineDialog=new Dialog({
+       id:'brfx_outline_settings',
+       title:'BRFX — Silhouette Outlines',
+       form:{
+         enabled:{label:'Enable Silhouette Outlines',type:'checkbox',value:plugin.outlineEnabled},
+         color:{label:'Outline Color',type:'color',value:plugin.outlineColor},
+         thickness:{label:'Outline Thickness',type:'number',value:plugin.outlineThickness,min:0.01,max:0.5,step:0.01}
+       },
+       onConfirm(form){
+         plugin.outlineEnabled=!!form.enabled;
+         plugin.outlineColor=(form.color&&typeof form.color.toHexString==='function')?form.color.toHexString():String(form.color||plugin.outlineColor);
+         plugin.outlineThickness=Math.max(0.01,Math.min(0.5,Number(form.thickness)||0.08));
+         updateOutlines();
+         try{if(typeof Preview!=='undefined'&&Preview.all)Preview.all.forEach(p=>{try{p&&p.render&&p.render()}catch(e){}})}catch(e){}
+         try{Blockbench.showQuickMessage(plugin.outlineEnabled?'BRFX: Silhouette outlines enabled':'BRFX: Silhouette outlines disabled',1800)}catch(e){}
+       }
+     });
+     plugin.outlineDialog.show();
+   }catch(e){console.error(e);try{Blockbench.showQuickMessage('BRFX: outline settings failed',2500)}catch(x){}}
+ };
+ const addOutlineAction=()=>{
+   try{
+     const action=new Action('brfx_outline_settings',{name:'BRFX — Silhouette Outlines',icon:'border_outer',click:openOutlineSettings});
+     if(typeof MenuBar!=='undefined'&&MenuBar.menus&&MenuBar.menus.tools)MenuBar.menus.tools.addAction(action);
+   }catch(e){}
+ };
+ const run=src=>{
+   try{
+     const m=src.match(/Plugin\.register\(['"]brfx['"]\s*,\s*(\{[\s\S]*\})\s*\);?\s*$/);
+     if(!m)throw Error('BRFX core parse failed');
+     const core=new Function('return '+m[1])();
+     if(core.onload)core.onload.call(core);
+     plugin.brfxEnabled=true;
+     plugin._core=core;
+     const originalUnload=core.onunload;
+     core.onunload=function(fromRestore=false){
+       removeOutlines();
+       if(typeof originalUnload==='function')return originalUnload.call(core,fromRestore);
+     };
+     const originalApply=core.applyAll;
+     if(typeof originalApply==='function')core.applyAll=function(showMessage=true){
+       if(plugin.brfxEnabled===false){removeOutlines();return null}
+       const r=originalApply.call(core,showMessage);
+       if(plugin.outlineEnabled)updateOutlines();
+       return r;
+     };
+     addOutlineAction();
+     removeOutlines();
+   }catch(e){console.error('BRFX 1.3.0 core load failed',e);try{Blockbench.showQuickMessage('BRFX: core load failed',3000)}catch(x){}}
+ };
+ const url='https://raw.githubusercontent.com/yamasung7-dot/BRFX/691d0aaeebe6729f1d575d8eef50d79a73d66167/brfx.js';
+ if(typeof fetch==='function')fetch(url,{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.text()}).then(run).catch(e=>{console.error(e);try{Blockbench.showQuickMessage('BRFX: could not reload core',3000)}catch(x){}});
+ else if(typeof $!=='undefined'&&typeof $.ajax==='function')$.ajax({url:url+'?v=1.3.0',cache:false,success:run,error:()=>{try{Blockbench.showQuickMessage('BRFX: could not reload core',3000)}catch(e){}}});
+},onunload(){
+ try{this.outlineEnabled=false;this.outlineSyncTimer&&clearInterval(this.outlineSyncTimer);if(this.outlineGroup&&this.outlineGroup.parent)this.outlineGroup.parent.remove(this.outlineGroup);this.outlineMaterials.forEach(m=>m.dispose&&m.dispose());this.outlineMaterials=[];this._core&&this._core.onunload&&this._core.onunload.call(this._core,false)}catch(e){}
+}});
